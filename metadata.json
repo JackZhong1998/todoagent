@@ -1,0 +1,7 @@
+{
+  "name": "Swiss Modern Todo",
+  "description": "基于瑞士现代主义风格设计的极致简洁多模态待办工具，支持 Markdown 渲染、图片粘贴、优先级排序及专注计时功能。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
