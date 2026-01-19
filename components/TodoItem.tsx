@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Trash2, CheckCircle, Circle } from 'lucide-react';
+import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock } from 'lucide-react';
 import { Todo, Priority } from '../types';
-import { formatDuration } from '../utils';
+import { formatDuration, formatFullDateTimeShort, formatDeadlineShort } from '../utils';
 import { PriorityBadge } from './PriorityBadge';
 
 interface TodoItemProps {
@@ -16,18 +16,29 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const [currentTime, setCurrentTime] = useState(todo.totalTime);
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<number | null>(null);
   const controlPanelRef = useRef<HTMLDivElement>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
+  const [deadlineDate, setDeadlineDate] = useState<string>('');
+  const [deadlineTime, setDeadlineTime] = useState<string>('');
 
   // 仅在非专注状态且内容确实不同时同步 state 到 innerHTML，避免输入时光标跳动
   useEffect(() => {
     if (editorRef.current && 
-        document.activeElement !== editorRef.current && 
-        editorRef.current.innerHTML !== todo.content) {
-      editorRef.current.innerHTML = todo.content || '';
+        document.activeElement !== editorRef.current) {
+      
+      let contentToDisplay = todo.content;
+      // 如果 content 为空，初始化显示 H1
+      if (!contentToDisplay) {
+          contentToDisplay = todo.title ? `<h1>${todo.title}</h1>` : '<h1><br></h1>';
+      }
+      
+      if (editorRef.current.innerHTML !== (contentToDisplay || '')) {
+        editorRef.current.innerHTML = contentToDisplay || '';
+      }
     }
-  }, [todo.content, todo.id]);
+  }, [todo.content, todo.title, todo.id]);
 
   // 点击编辑器外部时关闭图片控制面板
   useEffect(() => {
@@ -69,20 +80,28 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const saveContent = useCallback(() => {
     if (editorRef.current) {
       const newContent = editorRef.current.innerHTML;
-      if (newContent !== todo.content) {
-        onUpdate(todo.id, { content: newContent });
+      
+      // Extract title from content logic
+      let newTitle = '无标题';
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = newContent;
+      const textContent = tempDiv.innerText || tempDiv.textContent || '';
+      const firstLine = textContent.split('\n').find(line => line.trim() !== '');
+      if (firstLine) {
+        newTitle = firstLine.trim().substring(0, 50);
+      } else {
+        // Fallback to empty title if content is empty
+        newTitle = '';
       }
-    }
-  }, [todo.id, todo.content, onUpdate]);
 
-  const saveTitle = useCallback(() => {
-    if (titleRef.current) {
-      const newTitle = titleRef.current.value;
-      if (newTitle !== todo.title) {
-        onUpdate(todo.id, { title: newTitle });
+      if (newContent !== todo.content) {
+        // If content is completely empty, we might want to keep the title?
+        // But if user deleted everything, maybe title should be empty too?
+        // Let's stick to the extracted title.
+        onUpdate(todo.id, { content: newContent, title: newTitle });
       }
     }
-  }, [todo.id, todo.title, onUpdate]);
+  }, [todo.id, todo.content, todo.title, onUpdate]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
@@ -117,6 +136,21 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     onUpdate(todo.id, { priority: nextPriority });
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter') {
+      const selection = window.getSelection();
+      const anchorNode = selection?.anchorNode;
+      const h1 = anchorNode?.nodeName === 'H1' ? anchorNode : anchorNode?.parentElement?.closest('h1');
+      
+      if (h1) {
+        // 让浏览器处理换行，然后强制转换为普通段落
+        setTimeout(() => {
+          document.execCommand('formatBlock', false, 'div');
+        }, 0);
+      }
+    }
+  };
+
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const selection = window.getSelection();
     if (!selection || !selection.focusNode) return;
@@ -135,7 +169,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         const focusNode = selection?.focusNode;
         const h1 = (focusNode?.nodeName === 'H1' ? focusNode : focusNode?.parentElement?.closest('h1')) as HTMLElement;
         if (h1) {
-          h1.className = 'text-3xl font-bold text-gray-400 mt-6 mb-4 leading-tight';
+          h1.className = 'text-3xl font-bold text-black mt-6 mb-4 leading-tight';
         }
       } else if (trimmedText === '##') {
         // H2
@@ -210,8 +244,8 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         ${isHighlighted ? 'border-blue-500 ring-4 ring-blue-500/10' : ''}
       `}
     >
-      {/* Header Controls */}
-      <div className="flex items-start gap-4 select-none mb-2">
+      {/* Combined Controls and Editor */}
+      <div className="flex items-start gap-4 select-none mb-2 relative">
         <button 
           onClick={toggleComplete}
           className="mt-1 text-gray-300 hover:text-blue-500 transition-colors flex-shrink-0"
@@ -222,52 +256,37 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             <Circle className="w-6 h-6 hover:stroke-blue-500" />
           )}
         </button>
-        
-        <input
-          ref={titleRef}
-          type="text"
-          defaultValue={todo.title}
-          onBlur={saveTitle}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
-          placeholder="任务标题"
-          className={`
-            flex-1 min-w-0 outline-none bg-transparent text-lg font-bold tracking-tight py-0.5
-            ${todo.isCompleted ? 'text-gray-400 line-through decoration-gray-300' : 'text-[#37352f]'}
-            placeholder:text-gray-300
-          `}
-        />
-        
-        <div className="flex items-center gap-3 flex-shrink-0 pt-1">
-          <PriorityBadge 
-            priority={todo.priority} 
-            onClick={changePriority}
-          />
 
-          <div className="flex items-center gap-2 font-mono text-xs tracking-wider text-gray-400 font-medium">
-            <span className={todo.isRunning ? "text-blue-600 font-bold" : ""}>
-              {formatDuration(currentTime)}
-            </span>
+        <div className="flex-1 min-w-0 relative">
+          <div className="absolute top-0 right-0 flex items-center gap-3 z-10 bg-white/50 backdrop-blur-sm pl-2 rounded-bl-lg">
+            <PriorityBadge 
+              priority={todo.priority} 
+              onClick={changePriority}
+            />
+
+            <div className="flex items-center gap-2 font-mono text-xs tracking-wider text-gray-400 font-medium">
+              <span className={todo.isRunning ? "text-blue-600 font-bold" : ""}>
+                {formatDuration(currentTime)}
+              </span>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* Inline Document Editor */}
-      <div className="relative min-h-[24px] pl-10">
-        <div
-          ref={editorRef}
-          contentEditable
-          onInput={handleInput}
-          onPaste={handlePaste}
-          onClick={handleImageClick}
-          onBlur={saveContent}
-          className={`
-            w-full outline-none text-[15px] leading-7 font-normal text-[#37352f]
-            empty:before:content-[attr(data-placeholder)] empty:before:text-gray-300
-            ${todo.isCompleted ? 'text-gray-400' : ''}
-            
-            [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-gray-400 [&_h1]:mt-8 [&_h1]:mb-4 [&_h1]:leading-tight
-            [&_h1:empty]:before:content-['一级标题'] [&_h1:empty]:before:text-gray-200
-            [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-gray-500 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:leading-snug
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onClick={handleImageClick}
+            onFocus={() => setIsEditing(true)}
+            onBlur={() => { setIsEditing(false); saveContent(); }}
+            className={`
+              w-full outline-none text-[15px] leading-7 font-normal text-[#37352f] pr-36
+              
+              [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-black [&_h1]:mt-0 [&_h1]:mb-4 [&_h1]:leading-tight
+              [&_h1:empty]:before:content-['新任务'] [&_h1:empty]:before:text-gray-200
+              [&_h1:has(br:only-child)]:before:content-['新任务'] [&_h1:has(br:only-child)]:before:text-gray-200
+              [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-gray-500 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:leading-snug
             [&_h2:empty]:before:content-['二级标题'] [&_h2:empty]:before:text-gray-200
             [&_h3]:text-lg [&_h3]:font-medium [&_h3]:text-gray-600 [&_h3]:mt-4 [&_h3]:mb-2
             
@@ -286,7 +305,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             [&_img]:cursor-pointer [&_img]:hover:shadow-md [&_img]:border [&_img]:border-transparent [&_img]:hover:border-blue-200
             [&_.float-left]:float-left [&_.float-left]:mr-6 [&_.float-left]:mb-2
           `}
-          data-placeholder="输入 # 切换一级标题，或直接开始记录..."
+          data-placeholder="新任务"
           spellCheck={false}
         />
         
@@ -329,6 +348,14 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           </div>
         )}
       </div>
+      </div>
+
+      {/* Bottom Left Created Time (only while editing) */}
+      {isEditing && (
+        <div className="absolute left-8 bottom-6 text-[10px] text-gray-300 font-mono tracking-tight">
+          {formatFullDateTimeShort(todo.createdAt)}
+        </div>
+      )}
 
       {/* Bottom Right Controls */}
 
@@ -346,6 +373,63 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           {todo.isRunning ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
         </button>
         
+        {/* Deadline (DDL) */}
+        <div className="relative">
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsDeadlineOpen(v => !v); }}
+            className={`${todo.deadlineAt ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'} w-10 h-10 flex items-center justify-center rounded-full transition-all`}
+            title="设置DDL"
+          >
+            <CalendarClock size={18} />
+          </button>
+          {isDeadlineOpen && (
+            <div className="absolute bottom-12 right-0 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-gray-100 p-3 w-72 z-50">
+              <div className="space-y-3">
+                <div className="text-xs text-gray-500 font-medium">设置截止时间（年月日时）</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={deadlineDate}
+                    onChange={(e) => setDeadlineDate(e.target.value)}
+                    className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-300 min-w-0"
+                  />
+                  <select
+                    value={deadlineTime.split(':')[0]}
+                    onChange={(e) => setDeadlineTime(`${e.target.value}:00`)}
+                    className="w-24 text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-300 bg-white"
+                  >
+                    <option value="" disabled>时</option>
+                    {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                      <option key={h} value={h}>{h}:00</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setIsDeadlineOpen(false); }}
+                    className="text-xs px-3 py-1.5 rounded-md hover:bg-gray-100 text-gray-600 transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (deadlineDate && deadlineTime) {
+                        const ts = new Date(`${deadlineDate}T${deadlineTime}`).getTime();
+                        onUpdate(todo.id, { deadlineAt: ts });
+                        setIsDeadlineOpen(false);
+                      }
+                    }}
+                    className="text-xs px-3 py-1.5 rounded-md bg-black text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    确定
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(todo.id); }}
           className="w-10 h-10 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
@@ -353,6 +437,13 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           <Trash2 size={18} />
         </button>
       </div>
+      
+      {/* Deadline display (month-day hour) */}
+      {todo.deadlineAt && (
+        <div className="absolute right-8 bottom-6 text-[10px] text-blue-600 font-mono tracking-tight">
+          {formatDeadlineShort(todo.deadlineAt)}
+        </div>
+      )}
     </div>
   );
 };

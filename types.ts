@@ -11,6 +11,7 @@ export interface Todo {
   content: string;
   priority: Priority;
   createdAt: number;
+  deadlineAt?: number | null;
   isRunning: boolean;
   startTime: number | null;
   totalTime: number;

@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const addTodo = () => {
     const newTodo: Todo = {
       id: generateId(),
-      title: '新任务',
+      title: '',
       content: '',
       priority: Priority.P2,
       createdAt: Date.now(),
@@ -54,7 +54,7 @@ const App: React.FC = () => {
   }, [todos, filter]);
 
   const sidebarTodos = useMemo(() => {
-    return todos.filter(t => t.title && t.title.trim() !== '').sort((a, b) => b.createdAt - a.createdAt);
+    return todos.sort((a, b) => b.createdAt - a.createdAt);
   }, [todos]);
 
   return (
@@ -89,8 +89,8 @@ const App: React.FC = () => {
                     }}
                     className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-200 ${highlightedTodoId === todo.id ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
                   >
-                    <span className="text-sm font-medium text-gray-700 truncate block">
-                      {todo.title}
+                    <span className={`text-sm font-medium truncate block ${todo.title ? 'text-gray-700' : 'text-gray-400 italic'}`}>
+                      {todo.title || '新任务'}
                     </span>
                   </button>
                 ))}

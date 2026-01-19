@@ -22,3 +22,30 @@ export const loadTodos = (): any[] => {
   const saved = localStorage.getItem('swiss_todos');
   return saved ? JSON.parse(saved) : [];
 };
+
+export const formatTime = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+};
+
+export const formatFullDateTimeShort = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const yy = String(d.getFullYear()).slice(-2);
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const DD = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yy}/${MM}/${DD} ${hh}:${mm}:${ss}`;
+};
+
+export const formatDeadlineShort = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const DD = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  return `${MM}/${DD} ${hh}:00`;
+};
