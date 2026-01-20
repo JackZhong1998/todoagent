@@ -22,6 +22,16 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [deadlineTime, setDeadlineTime] = useState<string>('');
+  const initRef = useRef(false);
+
+  useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      if (!todo.title && !todo.content && todo.priority !== Priority.P0) {
+        onUpdate(todo.id, { priority: Priority.P0 });
+      }
+    }
+  }, [todo.id]);
 
   // 仅在非专注状态且内容确实不同时同步 state 到 innerHTML，避免输入时光标跳动
   useEffect(() => {
