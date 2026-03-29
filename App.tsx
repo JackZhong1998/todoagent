@@ -1,15 +1,18 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot } from 'lucide-react';
 import { Todo, Priority, FilterType } from './types';
 import { generateId, loadTodos, saveTodos } from './utils';
 import { TodoItem } from './components/TodoItem';
+import { ChatPanel } from './components/ChatPanel';
 
 const App: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>(() => loadTodos());
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [highlightedTodoId, setHighlightedTodoId] = useState<string | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [currentTodoForChat, setCurrentTodoForChat] = useState<Todo | undefined>(undefined);
 
   useEffect(() => {
     saveTodos(todos);
@@ -38,6 +41,21 @@ const App: React.FC = () => {
     setTodos(prev => prev.filter(t => t.id !== id));
   };
 
+  const openGlobalChat = () => {
+    setCurrentTodoForChat(undefined);
+    setIsChatOpen(true);
+  };
+
+  const openTodoChat = (todo: Todo) => {
+    setCurrentTodoForChat(todo);
+    setIsChatOpen(true);
+  };
+
+  const closeChat = () => {
+    setIsChatOpen(false);
+    setCurrentTodoForChat(undefined);
+  };
+
   const filteredAndSortedTodos = useMemo(() => {
     let list = [...todos];
     if (filter !== 'ALL') {
@@ -58,7 +76,7 @@ const App: React.FC = () => {
   }, [todos]);
 
   return (
-    <div className="min-h-screen bg-[#fcfcfc] flex relative">
+    <div className="min-h-screen bg-[#fcfcfc] flex">
       {/* Toggle Button */}
       <button
         onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
@@ -70,8 +88,8 @@ const App: React.FC = () => {
       {/* Sidebar */}
       <aside 
         className={`
-          fixed left-0 top-0 h-full bg-[#fcfcfc] transition-all duration-300 ease-out z-10
-          ${isSidebarCollapsed ? 'w-0 opacity-0' : 'w-72 opacity-100'}
+          flex-shrink-0 h-screen bg-[#fcfcfc] transition-all duration-300 ease-out
+          ${isSidebarCollapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-72 opacity-100'}
         `}
       >
         <div className="h-full flex flex-col pt-16 px-6">
@@ -108,13 +126,8 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Content */}
-      <div 
-        className={`
-          flex-1 transition-all duration-300 ease-out
-          ${isSidebarCollapsed ? 'ml-0' : 'ml-72'}
-        `}
-      >
-        <div className="px-6 py-6 md:px-12 lg:px-24">
+      <div className="flex-1 h-screen overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-y-auto px-6 py-6 md:px-12 lg:px-24">
           <div className="max-w-[1000px] mx-auto">
             <main className="space-y-10">
               <div className="flex items-center justify-between gap-2">
@@ -129,12 +142,21 @@ const App: React.FC = () => {
                     </button>
                   ))}
                 </div>
-                <button
-                  onClick={addTodo}
-                  className="w-11 h-11 bg-black text-white rounded-full flex items-center justify-center hover:bg-zinc-800 transition-all active:scale-90 shadow-2xl shadow-black/10"
-                >
-                  <Plus size={20} strokeWidth={3} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openGlobalChat}
+                    className="w-11 h-11 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center hover:from-blue-600 hover:to-purple-700 transition-all active:scale-90 shadow-2xl shadow-blue-500/20"
+                    title="AI 助手"
+                  >
+                    <Bot size={20} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    onClick={addTodo}
+                    className="w-11 h-11 bg-black text-white rounded-full flex items-center justify-center hover:bg-zinc-800 transition-all active:scale-90 shadow-2xl shadow-black/10"
+                  >
+                    <Plus size={20} strokeWidth={3} />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-6">
@@ -146,6 +168,7 @@ const App: React.FC = () => {
                         onUpdate={updateTodo} 
                         onDelete={deleteTodo}
                         isHighlighted={highlightedTodoId === todo.id}
+                        onOpenChat={() => openTodoChat(todo)}
                       />
                     </div>
                   ))
@@ -162,6 +185,14 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Chat Panel - 同层级布局 */}
+      <ChatPanel
+        isOpen={isChatOpen}
+        onClose={closeChat}
+        initialTodo={currentTodoForChat}
+        onNewGlobalChat={openGlobalChat}
+      />
       
       <div className="fixed inset-0 pointer-events-none -z-20 opacity-[0.03]">
         <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>

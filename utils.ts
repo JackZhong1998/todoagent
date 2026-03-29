@@ -1,4 +1,6 @@
 
+import { Conversation } from './types';
+
 export const formatDuration = (seconds: number): string => {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
@@ -20,6 +22,15 @@ export const saveTodos = (todos: any[]) => {
 
 export const loadTodos = (): any[] => {
   const saved = localStorage.getItem('swiss_todos');
+  return saved ? JSON.parse(saved) : [];
+};
+
+export const saveConversations = (conversations: Conversation[]) => {
+  localStorage.setItem('swiss_conversations', JSON.stringify(conversations));
+};
+
+export const loadConversations = (): Conversation[] => {
+  const saved = localStorage.getItem('swiss_conversations');
   return saved ? JSON.parse(saved) : [];
 };
 
@@ -49,3 +60,33 @@ export const formatDeadlineShort = (timestamp: number): string => {
   const hh = String(d.getHours()).padStart(2, '0');
   return `${MM}/${DD} ${hh}:00`;
 };
+
+export const stripHtmlTags = (html: string): string => {
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  return temp.textContent || temp.innerText || '';
+};
+
+export const SYSTEM_PROMPT = `你是一个专业的 To-Do 任务助手，专门帮助用户完成各种任务。
+
+你的核心职责：
+1. 理解用户的任务需求
+2. 提供具体、可操作的建议和方案
+3. 帮助用户分解复杂任务为可执行的小步骤
+4. 提供专业的知识支持
+5. 保持积极、鼓励的态度
+
+回答要求：
+- 回答要简洁明了，重点突出
+- 提供具体的步骤和建议，而不是空泛的理论
+- 如果有代码相关的需求，提供可运行的代码示例
+- 鼓励用户采取行动
+- 使用中文回复，除非用户使用其他语言
+
+关于任务处理：
+- 如果任务不明确，主动询问用户更多细节
+- 帮助用户设定合理的优先级
+- 提供时间管理建议
+- 可以帮助用户进行头脑风暴
+
+请记住，你的目标是帮助用户高效地完成任务！`;

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock } from 'lucide-react';
+import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lucide-react';
 import { Todo, Priority } from '../types';
 import { formatDuration, formatFullDateTimeShort, formatDeadlineShort } from '../utils';
 import { PriorityBadge } from './PriorityBadge';
@@ -10,9 +10,10 @@ interface TodoItemProps {
   onUpdate: (id: string, updates: Partial<Todo>) => void;
   onDelete: (id: string) => void;
   isHighlighted?: boolean;
+  onOpenChat?: () => void;
 }
 
-export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false }) => {
+export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false, onOpenChat }) => {
   const [currentTime, setCurrentTime] = useState(todo.totalTime);
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -367,9 +368,22 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         </div>
       )}
 
-      {/* Bottom Right Controls */}
+      {/* Bottom Controls */}
 
-      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+      <div className="flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+        {/* Bottom Left - AI Chat */}
+        {onOpenChat && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenChat(); }}
+            className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg shadow-blue-500/20"
+            title="AI 助手"
+          >
+            <Bot size={18} />
+          </button>
+        )}
+        
+        {/* Bottom Right Controls */}
+        <div className="flex items-center gap-2">
         <button
           onClick={handleToggleTimer}
           className={`
@@ -446,6 +460,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         >
           <Trash2 size={18} />
         </button>
+        </div>
       </div>
       
       {/* Deadline display (month-day hour) */}
