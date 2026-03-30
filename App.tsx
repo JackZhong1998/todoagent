@@ -5,8 +5,11 @@ import { Todo, Priority, FilterType } from './types';
 import { generateId, loadTodos, saveTodos } from './utils';
 import { TodoItem } from './components/TodoItem';
 import { ChatPanel } from './components/ChatPanel';
+import { UserSettings } from './components/UserSettings';
+import { useLanguage } from './contexts/LanguageContext';
 
 const App: React.FC = () => {
+  const { t } = useLanguage();
   const [todos, setTodos] = useState<Todo[]>(() => loadTodos());
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -138,7 +141,7 @@ const App: React.FC = () => {
                       onClick={() => setFilter(f)}
                       className={`px-8 py-3 rounded-full text-xs font-black tracking-widest uppercase transition-all ${filter === f ? 'bg-white shadow-md text-black' : 'text-gray-400 hover:text-gray-600'}`}
                     >
-                      {f === 'ALL' ? '全部' : f}
+                      {f === 'ALL' ? t.app.all : f}
                     </button>
                   ))}
                 </div>
@@ -146,7 +149,7 @@ const App: React.FC = () => {
                   <button
                     onClick={openGlobalChat}
                     className="w-11 h-11 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center hover:from-blue-600 hover:to-purple-700 transition-all active:scale-90 shadow-2xl shadow-blue-500/20"
-                    title="AI 助手"
+                    title={t.app.aiAssistant}
                   >
                     <Bot size={20} strokeWidth={2.5} />
                   </button>
@@ -177,7 +180,7 @@ const App: React.FC = () => {
                     <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
                       <LayoutGrid className="text-gray-200" size={40} />
                     </div>
-                    <p className="text-gray-300 font-bold uppercase tracking-widest text-sm">空无一物 / 期待你的灵感</p>
+                    <p className="text-gray-300 font-bold uppercase tracking-widest text-sm">{t.app.empty}</p>
                   </div>
                 )}
               </div>
@@ -193,6 +196,9 @@ const App: React.FC = () => {
         initialTodo={currentTodoForChat}
         onNewGlobalChat={openGlobalChat}
       />
+      
+      {/* User Settings Panel */}
+      <UserSettings />
       
       <div className="fixed inset-0 pointer-events-none -z-20 opacity-[0.03]">
         <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
