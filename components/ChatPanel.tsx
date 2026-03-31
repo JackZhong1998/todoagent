@@ -1,12 +1,15 @@
 
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, MessageSquare, History, Plus, Send, Bot, User, Loader2, ChevronRight } from 'lucide-react';
+import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Conversation, Message, Todo } from '../types';
 import { generateId, loadConversations, saveConversations, stripHtmlTags, SYSTEM_PROMPT } from '../utils';
 
 interface ChatPanelProps {
   isOpen: boolean;
+  width: number;
   onClose: () => void;
   initialTodo?: Todo;
   onNewGlobalChat: () => void;
@@ -16,6 +19,7 @@ const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能�
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({ 
   isOpen, 
+  width,
   onClose, 
   initialTodo, 
   onNewGlobalChat 
@@ -26,13 +30,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  const envApiKey = (import.meta as any).env?.VITE_MOONSHOT_API_KEY || '';
-  const [apiKey, setApiKey] = useState(() => {
-    if (envApiKey) return envApiKey;
-    return localStorage.getItem('moonshot_api_key') || '';
-  });
-  const [showApiKeyInput, setShowApiKeyInput] = useState(!envApiKey && !localStorage.getItem('moonshot_api_key'));
+  const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
 
   const currentConversation = useMemo(() => {
     return currentConversationId 
@@ -42,6 +40,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const globalConversations = conversations.filter(c => !c.todoId);
   const todoConversations = conversations.filter(c => c.todoId);
+  const getTodoInputText = (todo: Todo) => {
+    const plainContent = stripHtmlTags(todo.content || '').trim();
+    return plainContent || todo.title || '';
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -49,7 +51,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         const existingTodoConversation = conversations.find(c => c.todoId === initialTodo.id);
         if (existingTodoConversation) {
           setCurrentConversationId(existingTodoConversation.id);
-          setInputText('');
+          setInputText(getTodoInputText(initialTodo));
         } else {
           const newConversation: Conversation = {
             id: generateId(),
@@ -64,8 +66,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           saveConversations(updatedConversations);
           setCurrentConversationId(newConversation.id);
           
-          const plainContent = stripHtmlTags(initialTodo.content);
-          setInputText(`请帮我完成这个任务：\n\n标题：${initialTodo.title || '无标题'}\n\n内容：${plainContent || '暂无内容'}`);
+          setInputText(getTodoInputText(initialTodo));
         }
       } else {
         createNewGlobalConversation();
@@ -121,7 +122,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const callKimiAPI = async (messages: Message[]): Promise<string> => {
     if (!apiKey) {
-      throw new Error('请先设置 Moonshot API Key');
+      throw new Error('请先在 .env 中设置 VITE_MOONSHOT_API_KEY');
     }
 
     const apiMessages = [
@@ -199,30 +200,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
-  const handleSaveApiKey = () => {
-    if (apiKey.trim()) {
-      localStorage.setItem('moonshot_api_key', apiKey.trim());
-      setShowApiKeyInput(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
-    <div className={`h-screen bg-white border-l border-gray-200 flex flex-col transition-all duration-300 ease-out ${isOpen ? 'w-[420px]' : 'w-0 overflow-hidden'}`}>
+    <div
+      className="h-screen bg-white border-l border-gray-200 flex flex-col transition-all duration-300 ease-out"
+      style={{ width: isOpen ? width : 0, overflow: isOpen ? 'visible' : 'hidden' }}
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-            <Bot size={16} className="text-white" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-gray-800">
-              {currentConversation?.title || 'AI 助手'}
-            </h2>
-            <p className="text-xs text-gray-400">
-              {initialTodo ? '任务专属对话' : '全局对话'}
-            </p>
-          </div>
+        <div>
+          <h2 className="text-sm font-bold text-gray-800">
+            {currentConversation?.title || 'AI 助手'}
+          </h2>
+          <p className="text-xs text-gray-400">
+            {initialTodo ? '任务专属对话' : '全局对话'}
+          </p>
         </div>
         
         <div className="flex items-center gap-1">
@@ -253,28 +245,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
       </div>
-
-      {showApiKeyInput && (
-        <div className="p-4 border-b border-gray-100 bg-yellow-50 flex-shrink-0">
-          <div className="text-xs text-yellow-700 mb-2 font-medium">请输入 Moonshot API Key</div>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="flex-1 px-3 py-2 bg-white border border-yellow-200 rounded-lg text-sm focus:outline-none focus:border-yellow-400"
-              onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
-            />
-            <button
-              onClick={handleSaveApiKey}
-              className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-zinc-800 transition-colors"
-            >
-              保存
-            </button>
-          </div>
-        </div>
-      )}
 
       <div className="flex-1 overflow-hidden relative">
         {showHistory && (
@@ -360,35 +330,31 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             currentConversation?.messages.map(message => (
               <div
                 key={message.id}
-                className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`
-                  w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center
-                  ${message.role === 'user' 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-black text-white'
-                  }
-                `}>
-                  {message.role === 'user' ? <User size={16} /> : <Bot size={16} />}
-                </div>
-                <div className={`
-                  max-w-[280px] px-4 py-3 rounded-2xl text-sm leading-relaxed
+                  max-w-[86%] px-4 py-3 rounded-2xl text-sm leading-relaxed
                   ${message.role === 'user'
                     ? 'bg-blue-500 text-white rounded-tr-md'
                     : 'bg-gray-100 text-gray-800 rounded-tl-md'
                   }
                 `}>
-                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  {message.role === 'assistant' ? (
+                    <div className="prose prose-sm max-w-none prose-headings:my-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-code:text-[12px] prose-pre:my-2 prose-pre:bg-gray-900 prose-pre:text-gray-100">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  )}
                 </div>
               </div>
             ))
           )}
           
           {isLoading && (
-            <div className="flex gap-3">
-              <div className="w-8 h-8 rounded-full bg-black text-white flex-shrink-0 flex items-center justify-center">
-                <Bot size={16} />
-              </div>
+            <div className="flex justify-start">
               <div className="bg-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md">
                 <Loader2 size={16} className="animate-spin" />
               </div>

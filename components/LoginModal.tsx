@@ -19,10 +19,11 @@ export const LoginModal: React.FC = () => {
   }, [showLoginModal, loginStep]);
 
   useEffect(() => {
-    if (!user) return;
+    // 仅在登录弹窗流程中完成鉴权后跳转，避免已登录用户被全局强制重定向到 /app
+    if (!showLoginModal || !user) return;
     setShowLoginModal(false);
     navigate(targetPath, { replace: true });
-  }, [user, navigate, setShowLoginModal]);
+  }, [showLoginModal, user, navigate, setShowLoginModal]);
 
   const isSignUp = useMemo(() => loginMode === 'signUp', [loginMode]);
   const title = useMemo(
