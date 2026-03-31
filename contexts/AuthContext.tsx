@@ -1,8 +1,13 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { useAuth as useClerkAuth, useClerk, useUser } from '@clerk/clerk-react';
 
 type AuthContextType = {
+  isAuthLoaded: boolean;
   isLoggedIn: boolean;
-  login: (userData?: any) => void;
+  login: () => void;
+  requireLogin: (mode?: 'signIn' | 'signUp', step?: 'prompt' | 'clerk') => void;
+  loginMode: 'signIn' | 'signUp';
+  loginStep: 'prompt' | 'clerk';
   logout: () => void;
   showLoginModal: boolean;
   setShowLoginModal: (show: boolean) => void;
@@ -12,33 +17,46 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    // 从localStorage中恢复登录状态
-    const savedLoginState = localStorage.getItem('isLoggedIn');
-    return savedLoginState ? JSON.parse(savedLoginState) : false;
-  });
+  const { user } = useUser();
+  const { isLoaded: isAuthLoaded, isSignedIn } = useClerkAuth();
+  const clerk = useClerk();
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [loginMode, setLoginMode] = useState<'signIn' | 'signUp'>('signIn');
+  const [loginStep, setLoginStep] = useState<'prompt' | 'clerk'>('prompt');
 
-  // 保存登录状态到localStorage
-  useEffect(() => {
-    localStorage.setItem('isLoggedIn', JSON.stringify(isLoggedIn));
-  }, [isLoggedIn]);
+  const isLoggedIn = !!isSignedIn;
 
-  const login = (userData?: any) => {
-    setIsLoggedIn(true);
-    setUser(userData || { id: 'user-1', name: 'User' });
-    setShowLoginModal(false);
+  const login = () => {
+    setLoginMode('signIn');
+    setLoginStep('clerk');
+    setShowLoginModal(true);
   };
 
-  const logout = () => {
-    setIsLoggedIn(false);
-    setUser(null);
-    localStorage.removeItem('isLoggedIn');
+  const requireLogin = (mode: 'signIn' | 'signUp' = 'signIn', step: 'prompt' | 'clerk' = 'prompt') => {
+    setLoginMode(mode);
+    setLoginStep(step);
+    setShowLoginModal(true);
+  };
+
+  const logout = async () => {
+    await clerk.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ isLoggedIn, login, logout, showLoginModal, setShowLoginModal, user }}>
+    <AuthContext.Provider
+      value={{
+        isAuthLoaded,
+        isLoggedIn,
+        login,
+        requireLogin,
+        loginMode,
+        loginStep,
+        logout,
+        showLoginModal,
+        setShowLoginModal,
+        user,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
