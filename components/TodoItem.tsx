@@ -4,6 +4,7 @@ import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lu
 import { Todo, Priority } from '../types';
 import { formatDuration, formatFullDateTimeShort, formatDeadlineShort } from '../utils';
 import { PriorityBadge } from './PriorityBadge';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TodoItemProps {
   todo: Todo;
@@ -14,6 +15,7 @@ interface TodoItemProps {
 }
 
 export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false, onOpenChat }) => {
+  const { t } = useLanguage();
   const [currentTime, setCurrentTime] = useState(todo.totalTime);
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -361,13 +363,6 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       </div>
       </div>
 
-      {/* Bottom Left Created Time (only while editing) */}
-      {isEditing && (
-        <div className="absolute left-8 bottom-6 text-[10px] text-gray-300 font-mono tracking-tight">
-          {formatFullDateTimeShort(todo.createdAt)}
-        </div>
-      )}
-
       {/* Bottom Controls */}
 
       <div className="flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300">
@@ -375,10 +370,10 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         {onOpenChat && (
           <button
             onClick={(e) => { e.stopPropagation(); onOpenChat(); }}
-            className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg shadow-blue-500/20"
-            title="AI 助手"
+            className="w-10 h-10 flex items-center justify-center rounded-full border border-stone-200/90 bg-white text-stone-500 transition-colors duration-200 hover:border-stone-300 hover:bg-stone-50 hover:text-stone-800"
+            title={t.app.aiAssistant}
           >
-            <Bot size={18} />
+            <Bot size={17} strokeWidth={1.5} aria-hidden />
           </button>
         )}
         
@@ -463,10 +458,15 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         </div>
       </div>
       
-      {/* Deadline display (month-day hour) */}
-      {todo.deadlineAt && (
-        <div className="absolute right-8 bottom-6 text-[10px] text-blue-600 font-mono tracking-tight">
-          {formatDeadlineShort(todo.deadlineAt)}
+      {/* Bottom right: DDL + created time (editing); DDL only when not editing */}
+      {(todo.deadlineAt || isEditing) && (
+        <div className="absolute right-8 bottom-6 flex flex-col items-end gap-0.5 text-[10px] font-mono tracking-tight">
+          {todo.deadlineAt && (
+            <span className="text-blue-600">{formatDeadlineShort(todo.deadlineAt)}</span>
+          )}
+          {isEditing && (
+            <span className="text-gray-300">{formatFullDateTimeShort(todo.createdAt)}</span>
+          )}
         </div>
       )}
     </div>

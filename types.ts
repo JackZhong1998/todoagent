@@ -35,3 +35,13 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
 }
+
+export type WorkspaceDocKind = 'markdown' | 'text' | 'html';
+
+export interface WorkspaceDoc {
+  id: string;
+  name: string;
+  kind: WorkspaceDocKind;
+  body: string;
+  createdAt: number;
+}

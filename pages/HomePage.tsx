@@ -1,112 +1,130 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, Sparkles, Target } from 'lucide-react';
 import { MarketingLayout } from '../components/MarketingLayout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageSeo } from '../utils/pageSeo';
+import { buildHomePageJsonLd } from '../utils/seoJsonLd';
 
 export const HomePage: React.FC = () => {
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const { isLoggedIn } = useAuth();
-  const isZh = language === 'zh';
+  const { home: h } = t;
+  const jsonLd = useMemo(() => buildHomePageJsonLd(language, t), [language, t]);
+  usePageSeo({
+    title: t.seo.home.title,
+    description: t.seo.home.description,
+    path: '/',
+    jsonLd,
+  });
   const features = [
-    {
-      title: isZh ? 'Attention 工作法驱动' : 'Powered by Attention Workflow',
-      description: isZh
-        ? '以 ToDo 为核心组织你的注意力流，把任务拆成可执行动作，让你和 Agent 始终聚焦当下最关键的下一步。'
-        : 'Turn every task into an actionable step so you and your Agent always stay focused on the most important next move.',
-      icon: Target,
-    },
-    {
-      title: isZh ? '人机协作持续积累 context' : 'Compound Context Through Collaboration',
-      description: isZh
-        ? '每一次协作都沉淀上下文，Agent 会越来越懂你的目标、偏好和工作节奏，形成长期复利。'
-        : 'Each collaboration builds reusable context, so your Agent gets better at matching your goals, style, and rhythm.',
-      icon: Sparkles,
-    },
-    {
-      title: isZh ? '两周建立高质量执行系统' : 'Build Your System in Two Weeks',
-      description: isZh
-        ? '通过可复盘、可追踪的任务机制，在两周内搭建稳定 workflow，向“上四休三”的节奏迈进。'
-        : 'With reviewable and trackable loops, build a reliable execution system in two weeks and work toward a 4-day week.',
-      icon: CheckCircle2,
-    },
+    { ...h.features.attention, icon: Target },
+    { ...h.features.context, icon: Sparkles },
+    { ...h.features.system, icon: CheckCircle2 },
   ];
 
   return (
     <MarketingLayout>
-      <section className="max-w-6xl mx-auto px-6 pt-16 pb-20">
-        <div className="grid lg:grid-cols-2 gap-12 items-center">
-          <div>
-            <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-              {isZh ? '面向深度工作的协作 SaaS' : 'SaaS for Focused Work Collaboration'}
-            </span>
-            <h1 className="mt-5 text-4xl md:text-5xl font-black leading-tight text-gray-900">
-              TodoAgent
-              <br />
-              {isZh ? '与你在工作上紧密协作的 Agent' : 'Your Agent for Deep Work Collaboration'}
+      <section className="max-w-5xl mx-auto px-6 sm:px-8 pt-20 sm:pt-28 pb-24 sm:pb-32">
+        <div className="grid lg:grid-cols-2 gap-16 lg:gap-24 items-start">
+          <div className="mkt-animate-in space-y-0">
+            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-neutral-400">{h.badge}</p>
+            <h1 className="mt-5 text-[2.5rem] sm:text-5xl lg:text-[3.25rem] font-semibold leading-[1.07] tracking-[-0.03em] text-neutral-950">
+              <span className="block">TodoAgent</span>
+              <span className="block mt-3 text-xl sm:text-2xl lg:text-[1.65rem] font-medium text-neutral-500 leading-snug tracking-tight max-w-lg">
+                {h.headlineSub}
+              </span>
             </h1>
-            <p className="mt-6 text-lg text-gray-600 leading-relaxed">
-              {isZh
-                ? '运用超适合 J 人和 LLMs 的 Attention 工作法，以 Todolist 为核心完成协作和积累 context，两周帮你实现上四休三。'
-                : 'Use an attention-first workflow built for planners and LLMs. Collaborate through your todo list, compound context, and move toward a 4-day workweek in two weeks.'}
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <p className="mt-10 text-[17px] sm:text-lg text-neutral-500 leading-relaxed max-w-xl">{h.heroDescription}</p>
+            <div className="mt-12 flex flex-wrap items-center gap-4">
               <Link
                 to="/app"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gray-900 text-white font-semibold hover:bg-black transition-colors"
+                className="inline-flex items-center justify-center gap-2 min-h-12 px-7 rounded-full bg-neutral-950 text-white text-[15px] font-medium hover:bg-neutral-800 transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0071e3]"
               >
-                {isLoggedIn
-                  ? (isZh ? '开始与 AI 工作' : 'Start Working with AI')
-                  : (isZh ? '立即免费使用' : 'Start for Free')}
-                <ArrowRight size={16} />
+                {isLoggedIn ? h.ctaStartWithAi : h.ctaStartFree}
+                <ArrowRight size={17} strokeWidth={2} aria-hidden className="opacity-90" />
               </Link>
               <Link
                 to="/blog"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-gray-300 text-gray-800 font-semibold hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center justify-center min-h-12 px-2 text-[15px] font-medium text-[#0071e3] hover:text-[#0077ed] transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0071e3] rounded-full"
               >
-                {isZh ? '阅读博客' : 'Read Blog'}
+                {h.ctaReadBlog}
+              </Link>
+              <Link
+                to="/solutions"
+                className="inline-flex items-center justify-center min-h-12 px-2 text-[15px] font-medium text-[#0071e3] hover:text-[#0077ed] transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0071e3] rounded-full"
+              >
+                {h.ctaBrowseSolutions}
               </Link>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-6 shadow-xl shadow-gray-200/50">
-            <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-white border border-gray-100">
-                <p className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Today Focus</p>
-                <p className="mt-2 font-semibold text-gray-900">
-                  {isZh ? '拆解本周目标并生成可执行 ToDo' : 'Break weekly goals into actionable todos'}
-                </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  {isZh ? 'Agent 已基于你的历史 context 生成下一步建议。' : 'Agent generates next steps from your historical context.'}
-                </p>
-              </div>
-              <div className="p-4 rounded-2xl bg-white border border-gray-100">
-                <p className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Collaboration Loop</p>
-                <p className="mt-2 font-semibold text-gray-900">
-                  {isZh ? '任务执行 - 反馈 - 复盘 - 沉淀' : 'Execute - Feedback - Review - Compound'}
-                </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  {isZh ? '让每次协作都成为下一次高效工作的基础。' : 'Turn each session into a stronger base for the next one.'}
-                </p>
+          <div
+            className="relative mkt-animate-in lg:pt-4"
+            style={{ animationDelay: '80ms' }}
+          >
+            <div className="rounded-2xl border border-neutral-200/90 bg-[#fafafa] p-8 sm:p-10">
+              <div className="space-y-6">
+                <div className="pb-6 border-b border-neutral-200/80">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-neutral-400">{h.demoTodayFocusLabel}</p>
+                  <p className="mt-3 text-lg font-semibold text-neutral-900 tracking-tight">{h.demoTodayFocusTitle}</p>
+                  <p className="mt-2 text-[15px] text-neutral-500 leading-relaxed">{h.demoTodayFocusDesc}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-neutral-400">{h.demoLoopLabel}</p>
+                  <p className="mt-3 text-lg font-semibold text-neutral-900 tracking-tight">{h.demoLoopTitle}</p>
+                  <p className="mt-2 text-[15px] text-neutral-500 leading-relaxed">{h.demoLoopDesc}</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-6 py-6">
-        <div className="grid md:grid-cols-3 gap-5">
-          {features.map(({ title, description, icon: Icon }) => (
-            <article key={title} className="p-6 rounded-2xl border border-gray-100 bg-white shadow-sm">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center">
-                <Icon size={18} />
+      <section className="max-w-5xl mx-auto px-6 sm:px-8 pb-28 sm:pb-36" aria-labelledby="home-features-heading">
+        <div className="h-px w-full bg-neutral-200/90 mb-16 sm:mb-20" aria-hidden />
+        <h2
+          id="home-features-heading"
+          className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400 mb-12 sm:mb-14"
+        >
+          {h.featuresSectionTitle}
+        </h2>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-12 sm:gap-14 lg:gap-16">
+          {features.map(({ title, description, icon: Icon }, i) => (
+            <article
+              key={title}
+              className="mkt-animate-in"
+              style={{ animationDelay: `${140 + i * 60}ms` }}
+            >
+              <div className="w-10 h-10 flex items-center justify-center text-neutral-400" aria-hidden>
+                <Icon size={22} strokeWidth={1.5} />
               </div>
-              <h3 className="mt-4 text-lg font-bold text-gray-900">{title}</h3>
-              <p className="mt-2 text-sm text-gray-600 leading-relaxed">{description}</p>
+              <h3 className="mt-6 text-lg font-semibold text-neutral-900 tracking-tight">{title}</h3>
+              <p className="mt-3 text-[15px] text-neutral-500 leading-relaxed">{description}</p>
             </article>
           ))}
         </div>
+      </section>
+
+      <section
+        className="max-w-3xl mx-auto px-6 sm:px-8 pb-28 sm:pb-36"
+        aria-labelledby="home-faq-heading"
+      >
+        <h2
+          id="home-faq-heading"
+          className="text-2xl sm:text-[1.75rem] font-semibold tracking-tight text-neutral-950"
+        >
+          {t.seo.faqTitle}
+        </h2>
+        <dl className="mt-10 space-y-8">
+          {t.seo.faq.map((item) => (
+            <div key={item.q}>
+              <dt className="text-[17px] font-semibold text-neutral-900 tracking-tight">{item.q}</dt>
+              <dd className="mt-2 text-[15px] text-neutral-500 leading-relaxed">{item.a}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
     </MarketingLayout>
   );
