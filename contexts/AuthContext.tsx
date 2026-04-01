@@ -12,13 +12,15 @@ type AuthContextType = {
   showLoginModal: boolean;
   setShowLoginModal: (show: boolean) => void;
   user: any;
+  /** Clerk session token (e.g. template `supabase` for Supabase RLS). */
+  getClerkToken: (options?: { template?: string }) => Promise<string | null>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useUser();
-  const { isLoaded: isAuthLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded: isAuthLoaded, isSignedIn, getToken } = useClerkAuth();
   const clerk = useClerk();
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginMode, setLoginMode] = useState<'signIn' | 'signUp'>('signIn');
@@ -55,6 +57,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         showLoginModal,
         setShowLoginModal,
         user,
+        getClerkToken: (options) => getToken(options),
       }}
     >
       {children}

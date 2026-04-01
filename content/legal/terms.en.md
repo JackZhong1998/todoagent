@@ -2,7 +2,7 @@
 
 **Effective date: April 1, 2026**
 
-**Last updated: April 1, 2026**
+**Last updated: April 2, 2026**
 
 ## 1. Acceptance and changes
 
@@ -99,7 +99,7 @@ If you breach this Section or other Terms, **we may warn you, restrict features,
 
 ### 5.2
 
-To operate the Service, **you grant us a worldwide, royalty-free, non-exclusive license** to **store (including in your browser’s local storage), process, display, and use User Content as reasonably necessary** to provide the Service and maintain security and functionality. **The Service does not currently allow public sharing of User Content.** If we later enable public or shared content, we will update these Terms and obtain consent where required.
+To operate the Service, **you grant us a worldwide, royalty-free, non-exclusive license** to **store (including in your browser’s local storage and, when you are signed in, in third-party cloud databases such as Supabase for sync), process, display, and use User Content as reasonably necessary** to provide the Service and maintain security and functionality. **The Service does not currently allow public sharing of User Content.** If we later enable public or shared content, we will update these Terms and obtain consent where required.
 
 ### 5.3
 
@@ -127,7 +127,7 @@ To the fullest extent permitted by law, **we make no warranty** as to the accura
 
 ### 7.1
 
-The Service integrates third parties such as **Clerk, Vercel, and Moonshot**. **You must comply with their terms and privacy policies.** Disputes with third parties are between you and them; **we are not responsible** except where mandatory law says otherwise.
+The Service integrates third parties such as **Clerk, Vercel, Supabase, and Moonshot**. **You must comply with their terms and privacy policies.** Disputes with third parties are between you and them; **we are not responsible** except where mandatory law says otherwise.
 
 ---
 

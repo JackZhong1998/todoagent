@@ -25,6 +25,8 @@ import { AIAnalysisPage, AnalysisResultItem, Replaceability, ANALYSIS_FAILED_TAS
 import { DocumentsPanel } from './DocumentsPanel';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
+import { WorkspaceSyncProvider } from '../contexts/WorkspaceSyncContext';
+import { useWorkspaceSupabaseSync } from '../hooks/useWorkspaceSupabaseSync';
 import { usePageSeo } from '../utils/pageSeo';
 
 type AppTab = 'todo' | 'stats' | 'docs';
@@ -120,6 +122,17 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
   const [analysisLoadingByTodoId, setAnalysisLoadingByTodoId] = useState<Record<string, boolean>>({});
   const [analysisRetryCountByTodoId, setAnalysisRetryCountByTodoId] = useState<Record<string, number>>({});
   const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+
+  const { bumpRemotePush } = useWorkspaceSupabaseSync({
+    projects,
+    activeProjectId,
+    todos,
+    analysisByTodoId,
+    setProjects,
+    setActiveProjectId,
+    setTodos,
+    setAnalysisByTodoId,
+  });
 
   useEffect(() => {
     saveProjectTodos(activeProjectId, todos);
@@ -360,6 +373,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
   );
 
   return (
+    <WorkspaceSyncProvider bumpSync={bumpRemotePush}>
     <div className="min-h-screen bg-[#fcfcfc] flex">
       <aside
         className={`
@@ -514,6 +528,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
         <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
       </div>
     </div>
+    </WorkspaceSyncProvider>
   );
 };
 

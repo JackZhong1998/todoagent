@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { Conversation, Message, Todo } from '../types';
 import { translations } from '../i18n/locales';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useWorkspaceSyncBump } from '../contexts/WorkspaceSyncContext';
 import { generateId, stripHtmlTags, SYSTEM_PROMPT } from '../utils';
 import { loadProjectConversations, saveProjectConversations } from '../utils/projectStorage';
 
@@ -39,6 +40,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onNewGlobalChat,
 }) => {
   const { t, language } = useLanguage();
+  const bumpRemoteSync = useWorkspaceSyncBump();
   const ct = t.chat;
   const dateLocale = language === 'zh' ? 'zh-CN' : 'en-US';
   const [conversations, setConversations] = useState<Conversation[]>(() =>
@@ -94,7 +96,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   useEffect(() => {
     saveProjectConversations(projectId, conversations);
-  }, [conversations, projectId]);
+    bumpRemoteSync();
+  }, [conversations, projectId, bumpRemoteSync]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

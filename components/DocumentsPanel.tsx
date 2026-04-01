@@ -7,6 +7,7 @@ import type { WorkspaceDoc } from '../types';
 import { generateId } from '../utils';
 import { loadProjectDocs, saveProjectDocs } from '../utils/projectStorage';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useWorkspaceSyncBump } from '../contexts/WorkspaceSyncContext';
 
 export type { WorkspaceDoc, WorkspaceDocKind } from '../types';
 
@@ -40,6 +41,7 @@ export interface DocumentsPanelProps {
 
 export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => {
   const { t } = useLanguage();
+  const bumpRemoteSync = useWorkspaceSyncBump();
   const d = t.docs;
   const [docs, setDocs] = useState<WorkspaceDoc[]>(() => loadProjectDocs(projectId));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,7 +50,8 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
 
   useEffect(() => {
     saveProjectDocs(projectId, docs);
-  }, [docs, projectId]);
+    bumpRemoteSync();
+  }, [docs, projectId, bumpRemoteSync]);
 
   useEffect(() => {
     if (docs.length === 0) {

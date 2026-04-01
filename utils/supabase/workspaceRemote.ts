@@ -1,0 +1,157 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AnalysisResultItem } from '../../components/AIAnalysisPage';
+import type { Conversation, Todo, WorkspaceDoc } from '../../types';
+import type { ProjectMeta } from '../projectStorage';
+
+export type RemotePullResult =
+  | { kind: 'empty' }
+  | {
+      kind: 'ok';
+      projects: ProjectMeta[];
+      activeProjectId: string;
+      byProjectId: Map<
+        string,
+        {
+          todos: Todo[];
+          analysis: Record<string, AnalysisResultItem>;
+          docs: WorkspaceDoc[];
+          conversations: Conversation[];
+        }
+      >;
+    };
+
+function asTodoArray(raw: unknown): Todo[] {
+  return Array.isArray(raw) ? (raw as Todo[]) : [];
+}
+
+function asAnalysisMap(raw: unknown): Record<string, AnalysisResultItem> {
+  return raw && typeof raw === 'object' ? (raw as Record<string, AnalysisResultItem>) : {};
+}
+
+function asDocArray(raw: unknown): WorkspaceDoc[] {
+  return Array.isArray(raw) ? (raw as WorkspaceDoc[]) : [];
+}
+
+function asConversationArray(raw: unknown): Conversation[] {
+  return Array.isArray(raw) ? (raw as Conversation[]) : [];
+}
+
+export async function pullWorkspace(client: SupabaseClient, userId: string): Promise<RemotePullResult> {
+  const { data: projectRows, error: pErr } = await client
+    .from('todoagent_projects')
+    .select('id, name')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: true });
+
+  if (pErr) throw pErr;
+  if (!projectRows?.length) return { kind: 'empty' };
+
+  const { data: stateRow, error: sErr } = await client
+    .from('todoagent_workspace_state')
+    .select('active_project_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (sErr) throw sErr;
+
+  const { data: dataRows, error: dErr } = await client
+    .from('todoagent_project_data')
+    .select('project_id, todos, analysis, docs, conversations')
+    .eq('user_id', userId);
+
+  if (dErr) throw dErr;
+
+  const projects: ProjectMeta[] = projectRows.map((r) => ({ id: r.id, name: r.name }));
+  const ids = new Set(projects.map((p) => p.id));
+  let activeProjectId = stateRow?.active_project_id ?? projects[0].id;
+  if (!ids.has(activeProjectId)) activeProjectId = projects[0].id;
+
+  const byProjectId = new Map<
+    string,
+    {
+      todos: Todo[];
+      analysis: Record<string, AnalysisResultItem>;
+      docs: WorkspaceDoc[];
+      conversations: Conversation[];
+    }
+  >();
+
+  for (const p of projects) {
+    byProjectId.set(p.id, {
+      todos: [],
+      analysis: {},
+      docs: [],
+      conversations: [],
+    });
+  }
+
+  for (const row of dataRows ?? []) {
+    const pid = row.project_id as string;
+    if (!byProjectId.has(pid)) continue;
+    byProjectId.set(pid, {
+      todos: asTodoArray(row.todos),
+      analysis: asAnalysisMap(row.analysis),
+      docs: asDocArray(row.docs),
+      conversations: asConversationArray(row.conversations),
+    });
+  }
+
+  return { kind: 'ok', projects, activeProjectId, byProjectId };
+}
+
+export async function pushWorkspace(
+  client: SupabaseClient,
+  userId: string,
+  projects: ProjectMeta[],
+  activeProjectId: string,
+  getPayload: (projectId: string) => {
+    todos: Todo[];
+    analysis: Record<string, AnalysisResultItem>;
+    docs: WorkspaceDoc[];
+    conversations: Conversation[];
+  }
+): Promise<void> {
+  if (!projects.length) return;
+
+  const now = new Date().toISOString();
+
+  const projectUpserts = projects.map((p) => ({
+    id: p.id,
+    user_id: userId,
+    name: p.name,
+    updated_at: now,
+  }));
+
+  const { error: puErr } = await client.from('todoagent_projects').upsert(projectUpserts, {
+    onConflict: 'user_id,id',
+  });
+  if (puErr) throw puErr;
+
+  const dataUpserts = projects.map((p) => {
+    const payload = getPayload(p.id);
+    return {
+      user_id: userId,
+      project_id: p.id,
+      todos: payload.todos,
+      analysis: payload.analysis,
+      docs: payload.docs,
+      conversations: payload.conversations,
+      updated_at: now,
+    };
+  });
+
+  const { error: duErr } = await client.from('todoagent_project_data').upsert(dataUpserts, {
+    onConflict: 'user_id,project_id',
+  });
+  if (duErr) throw duErr;
+
+  const { error: suErr } = await client.from('todoagent_workspace_state').upsert(
+    {
+      user_id: userId,
+      active_project_id: activeProjectId,
+      updated_at: now,
+    },
+    { onConflict: 'user_id' }
+  );
+  if (suErr) throw suErr;
+}
