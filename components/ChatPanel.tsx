@@ -5,9 +5,22 @@ import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight } from 'lu
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Conversation, Message, Todo } from '../types';
-import { generateId, loadConversations, saveConversations, stripHtmlTags, SYSTEM_PROMPT } from '../utils';
+import { translations } from '../i18n/locales';
+import { useLanguage } from '../contexts/LanguageContext';
+import { generateId, stripHtmlTags, SYSTEM_PROMPT } from '../utils';
+import { loadProjectConversations, saveProjectConversations } from '../utils/projectStorage';
+
+function isDefaultChatTitle(title: string): boolean {
+  return (
+    title === translations.en.chat.newGlobalTitle ||
+    title === translations.zh.chat.newGlobalTitle ||
+    title === translations.en.chat.newTodoTitle ||
+    title === translations.zh.chat.newTodoTitle
+  );
+}
 
 interface ChatPanelProps {
+  projectId: string;
   isOpen: boolean;
   width: number;
   onClose: () => void;
@@ -17,14 +30,20 @@ interface ChatPanelProps {
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ 
-  isOpen, 
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  projectId,
+  isOpen,
   width,
-  onClose, 
-  initialTodo, 
-  onNewGlobalChat 
+  onClose,
+  initialTodo,
+  onNewGlobalChat,
 }) => {
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations());
+  const { t, language } = useLanguage();
+  const ct = t.chat;
+  const dateLocale = language === 'zh' ? 'zh-CN' : 'en-US';
+  const [conversations, setConversations] = useState<Conversation[]>(() =>
+    loadProjectConversations(projectId)
+  );
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -55,7 +74,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         } else {
           const newConversation: Conversation = {
             id: generateId(),
-            title: initialTodo.title || '新任务对话',
+            title: initialTodo.title || ct.newTodoTitle,
             messages: [],
             todoId: initialTodo.id,
             createdAt: Date.now(),
@@ -63,7 +82,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           };
           const updatedConversations = [newConversation, ...conversations];
           setConversations(updatedConversations);
-          saveConversations(updatedConversations);
           setCurrentConversationId(newConversation.id);
           
           setInputText(getTodoInputText(initialTodo));
@@ -75,8 +93,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, [isOpen, initialTodo?.id]);
 
   useEffect(() => {
-    saveConversations(conversations);
-  }, [conversations]);
+    saveProjectConversations(projectId, conversations);
+  }, [conversations, projectId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -85,14 +103,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const createNewGlobalConversation = () => {
     const newConversation: Conversation = {
       id: generateId(),
-      title: '新对话',
+      title: ct.newGlobalTitle,
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
     const updatedConversations = [newConversation, ...conversations];
     setConversations(updatedConversations);
-    saveConversations(updatedConversations);
     setCurrentConversationId(newConversation.id);
     setShowHistory(false);
     setInputText('');
@@ -103,7 +120,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       if (c.id === conversationId) {
         const updatedMessages = [...c.messages, message];
         let newTitle = c.title;
-        if (c.title === '新对话' || c.title === '新任务对话') {
+        if (isDefaultChatTitle(c.title)) {
           const firstUserMessage = updatedMessages.find(m => m.role === 'user');
           if (firstUserMessage) {
             newTitle = firstUserMessage.content.substring(0, 30) + (firstUserMessage.content.length > 30 ? '...' : '');
@@ -122,7 +139,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const callKimiAPI = async (messages: Message[]): Promise<string> => {
     if (!apiKey) {
-      throw new Error('请先在 .env 中设置 VITE_MOONSHOT_API_KEY');
+      throw new Error(ct.missingApiKey);
     }
 
     const apiMessages = [
@@ -145,7 +162,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || `API 调用失败: ${response.status}`);
+      throw new Error(errorData.error?.message || `${ct.apiFailedPrefix}${response.status}`);
     }
 
     const data = await response.json();
@@ -184,7 +201,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       const errorMessage: Message = {
         id: generateId(),
         role: 'assistant',
-        content: `抱歉，发生了错误：${error instanceof Error ? error.message : '未知错误'}`,
+        content: `${ct.errorPrefix}${error instanceof Error ? error.message : ct.errorUnknown}`,
         timestamp: Date.now()
       };
       addMessageToConversation(currentConversationId, errorMessage);
@@ -204,16 +221,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   return (
     <div
-      className="h-screen bg-white border-l border-gray-200 flex flex-col transition-all duration-300 ease-out"
+      className="h-screen bg-white flex flex-col transition-all duration-300 ease-out"
       style={{ width: isOpen ? width : 0, overflow: isOpen ? 'visible' : 'hidden' }}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
         <div>
           <h2 className="text-sm font-bold text-gray-800">
-            {currentConversation?.title || 'AI 助手'}
+            {currentConversation?.title || t.app.aiAssistant}
           </h2>
           <p className="text-xs text-gray-400">
-            {initialTodo ? '任务专属对话' : '全局对话'}
+            {initialTodo ? ct.scopeTodo : ct.scopeGlobal}
           </p>
         </div>
         
@@ -222,7 +239,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             <button
               onClick={createNewGlobalConversation}
               className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="新建对话"
+              title={ct.newChatTooltip}
             >
               <Plus size={18} />
             </button>
@@ -232,14 +249,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             className={`p-2 rounded-lg transition-colors ${
               showHistory ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
             }`}
-            title="历史记录"
+            title={ct.historyTooltip}
           >
             <History size={18} />
           </button>
           <button
             onClick={onClose}
             className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-            title="关闭"
+            title={ct.closeTooltip}
           >
             <X size={18} />
           </button>
@@ -251,7 +268,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           <div className="absolute inset-0 bg-white z-20 border-b border-gray-100">
             <div className="p-4 h-full overflow-y-auto">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-                {initialTodo ? '任务对话' : '全局对话'}
+                {initialTodo ? ct.historySectionTodo : ct.historySectionGlobal}
               </h3>
               <div className="space-y-1">
                 {(initialTodo ? todoConversations.filter(c => c.todoId === initialTodo.id) : globalConversations).map(conv => (
@@ -271,7 +288,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     <div className="flex-1 min-w-0">
                       <div className="truncate font-medium">{conv.title}</div>
                       <div className="text-xs text-gray-400 mt-0.5">
-                        {new Date(conv.updatedAt).toLocaleDateString()}
+                        {new Date(conv.updatedAt).toLocaleDateString(dateLocale)}
                       </div>
                     </div>
                     <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
@@ -282,7 +299,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               {!initialTodo && (
                 <>
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mt-6 mb-3">
-                    任务对话
+                    {ct.historySectionTodo}
                   </h3>
                   <div className="space-y-1">
                     {todoConversations.map(conv => (
@@ -302,7 +319,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                         <div className="flex-1 min-w-0">
                           <div className="truncate font-medium">{conv.title}</div>
                           <div className="text-xs text-gray-400 mt-0.5">
-                            {new Date(conv.updatedAt).toLocaleDateString()}
+                            {new Date(conv.updatedAt).toLocaleDateString(dateLocale)}
                           </div>
                         </div>
                         <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
@@ -321,10 +338,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
                 <MessageSquare size={32} className="text-gray-300" />
               </div>
-              <h3 className="text-gray-700 font-semibold mb-2">开始对话</h3>
-              <p className="text-gray-400 text-sm">
-                有什么任务需要帮助吗？随时告诉我！
-              </p>
+              <h3 className="text-gray-700 font-semibold mb-2">{ct.emptyHeading}</h3>
+              <p className="text-gray-400 text-sm">{ct.emptyHint}</p>
             </div>
           ) : (
             currentConversation?.messages.map(message => (
@@ -371,7 +386,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入你的问题..."
+            placeholder={ct.inputPlaceholder}
             className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 resize-none max-h-32"
             rows={1}
           />

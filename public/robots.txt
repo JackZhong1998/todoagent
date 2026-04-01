@@ -1,0 +1,22 @@
+# https://todoagent.cc — 部署到其他域名时请同步替换下方 Sitemap 与 Disallow 中的主机名，或通过构建脚本注入。
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /app/
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+Sitemap: https://todoagent.cc/sitemap.xml

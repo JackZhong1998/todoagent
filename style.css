@@ -1,15 +1,50 @@
 @import "tailwindcss";
 
+@theme {
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: #fcfcfc;
-    color: #1a1a1a;
+    font-family: var(--font-sans);
+    background-color: #ffffff;
+    color: #1d1d1f;
     -webkit-font-smoothing: antialiased;
 }
 
-/* Custom scrollbar for Swiss style */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@keyframes mkt-fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.mkt-animate-in {
+    animation: mkt-fade-up 0.45s ease-out both;
+}
+
+/* Swiss / minimal scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #d8d8dc transparent;
+}
+
 ::-webkit-scrollbar {
-    width: 4px;
+    width: 2px;
+    height: 2px;
 }
 
 ::-webkit-scrollbar-track {
@@ -17,10 +52,17 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #e5e5e5;
-    border-radius: 10px;
+    background-color: #d8d8dc;
+    border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #d1d1d1;
+    background-color: #c4c4c8;
+}
+
+/* Main todo/content column: shorter-looking vertical thumb (safe: no horizontal bars here) */
+.app-main-scroll::-webkit-scrollbar-thumb {
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    background-clip: padding-box;
 }
