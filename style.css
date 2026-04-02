@@ -36,6 +36,45 @@ body {
     animation: mkt-fade-up 0.45s ease-out both;
 }
 
+@keyframes focus-wave-move {
+    from {
+        transform: translateX(-6%) scale(1);
+        opacity: 0.35;
+    }
+    50% {
+        transform: translateX(0) scale(1.04);
+        opacity: 0.5;
+    }
+    to {
+        transform: translateX(6%) scale(1);
+        opacity: 0.35;
+    }
+}
+
+.focus-wave-bg::before,
+.focus-wave-bg::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(1050px, 95vw);
+    height: 320px;
+    border-radius: 999px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side, rgba(10, 10, 10, 0.22), rgba(10, 10, 10, 0) 72%);
+    filter: blur(10px);
+}
+
+.focus-wave-bg::before {
+    animation: focus-wave-move 7.5s ease-in-out infinite;
+}
+
+.focus-wave-bg::after {
+    width: min(860px, 86vw);
+    height: 240px;
+    animation: focus-wave-move 9s ease-in-out infinite reverse;
+}
+
 /* Swiss / minimal scrollbar */
 * {
     scrollbar-width: thin;

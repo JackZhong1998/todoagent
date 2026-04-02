@@ -91,6 +91,10 @@ export const translations = {
       resizeHandleTooltip: 'Drag to resize the chat panel',
       agentToolsHint:
         'Sign in with Supabase configured to enable web search, page fetch, and skill import from URLs.',
+      webSearchOn: 'Web search on',
+      webSearchOff: 'Web search off',
+      attachImageTooltip: 'Attach image',
+      userBubbleImageLabel: '[Image]',
     },
     analysis: {
       entryTooltip: 'Task replaceability stats',
@@ -384,6 +388,10 @@ export const translations = {
       resizeHandleTooltip: '拖拽调整对话区宽度',
       agentToolsHint:
         '登录且已配置 Supabase 后，可使用联网搜索、网页抓取与从链接导入 Skill（需部署 Edge Function 并设置 BRAVE_API_KEY）。',
+      webSearchOn: '已开启联网搜索',
+      webSearchOff: '未开启联网搜索（省流量；需要时再点亮）',
+      attachImageTooltip: '上传图片',
+      userBubbleImageLabel: '[图片]',
     },
     analysis: {
       entryTooltip: '任务可替代性统计',

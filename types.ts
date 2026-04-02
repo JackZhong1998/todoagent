@@ -26,6 +26,8 @@ export interface Message {
   content: string;
   /** Actual prompt sent to model; falls back to `content` for old records. */
   apiContent?: string;
+  /** Data URLs (e.g. image/png;base64,...) attached to this user message for vision models. */
+  imageDataUrls?: string[];
   /** Visual quote shown under user bubble for Todo-context asks. */
   todoQuote?: {
     title: string;

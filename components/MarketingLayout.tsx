@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
 import { BrandMark } from './BrandMark';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -9,21 +8,22 @@ type Props = {
   children: React.ReactNode;
 };
 
-const Logo: React.FC<{ tagline: string }> = ({ tagline }) => {
+/** “To” + do 标 + “Agent”，无倾斜、挨近图标 */
+const BrandWordmark: React.FC = () => {
+  const type = 'text-[1.5rem] font-semibold leading-none tracking-tight font-sans';
+
   return (
-    <Link
-      to="/"
-      className="flex items-center gap-3 group rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0071e3]"
-    >
+    <span className="inline-flex items-center gap-0.5 sm:gap-1 text-neutral-950 select-none">
+      <span className={`inline-flex items-baseline ${type}`}>
+        <span>T</span>
+        <span className="-ml-px">o</span>
+      </span>
       <BrandMark
         size={36}
         className="shrink-0 rounded-lg overflow-hidden transition-opacity duration-200 group-hover:opacity-90"
       />
-      <div>
-        <p className="text-[10px] uppercase tracking-[0.28em] text-neutral-400 font-medium">TodoAgent</p>
-        <p className="text-[15px] font-semibold text-neutral-900 tracking-tight -mt-0.5 leading-snug">{tagline}</p>
-      </div>
-    </Link>
+      <span className={type}>Agent</span>
+    </span>
   );
 };
 
@@ -31,70 +31,23 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
   const { login, isLoggedIn, user } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const m = t.marketing;
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-
-  const navLinks = (
-    <>
-      <Link
-        to="/solutions"
-        className="text-[15px] text-neutral-500 hover:text-neutral-900 py-2.5 md:py-0 transition-colors duration-150"
-        onClick={() => setMobileNavOpen(false)}
-      >
-        {m.navSolutions}
-      </Link>
-      <Link
-        to="/blog"
-        className="text-[15px] text-neutral-500 hover:text-neutral-900 py-2.5 md:py-0 transition-colors duration-150"
-        onClick={() => setMobileNavOpen(false)}
-      >
-        {m.navBlog}
-      </Link>
-      <Link
-        to="/about"
-        className="text-[15px] text-neutral-500 hover:text-neutral-900 py-2.5 md:py-0 transition-colors duration-150"
-        onClick={() => setMobileNavOpen(false)}
-      >
-        {m.navAbout}
-      </Link>
-      <Link
-        to="/privacy"
-        className="text-[15px] text-neutral-500 hover:text-neutral-900 py-2.5 md:py-0 transition-colors duration-150"
-        onClick={() => setMobileNavOpen(false)}
-      >
-        {m.navPrivacy}
-      </Link>
-      <Link
-        to="/terms"
-        className="text-[15px] text-neutral-500 hover:text-neutral-900 py-2.5 md:py-0 transition-colors duration-150"
-        onClick={() => setMobileNavOpen(false)}
-      >
-        {m.navTerms}
-      </Link>
-    </>
-  );
 
   return (
     <div className="min-h-dvh bg-white text-neutral-900 font-sans antialiased selection:bg-neutral-200/80">
       <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/80 backdrop-blur-xl backdrop-saturate-150">
         <div
-          className={`max-w-5xl mx-auto px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 ${
-            language === 'en' ? 'md:gap-x-4 lg:gap-x-6' : 'gap-6'
-          }`}
+          className="max-w-6xl mx-auto px-4 sm:px-8 py-4 flex items-center justify-between gap-4"
         >
           <div className="min-w-0 shrink">
-            <Logo tagline={m.logoTagline} />
+            <Link
+              to="/"
+              className="group inline-flex items-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0071e3]"
+              aria-label="TodoAgent Home"
+            >
+              <BrandWordmark />
+            </Link>
           </div>
-
-          <nav
-            className={`hidden md:flex flex-wrap items-center justify-end min-w-0 ${
-              language === 'en' ? 'gap-x-4 gap-y-1 text-[13px] xl:text-[15px] xl:gap-x-8' : 'gap-x-10 text-[15px]'
-            }`}
-            aria-label="Main"
-          >
-            {navLinks}
-          </nav>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto md:ml-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
             <button
               type="button"
               onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
@@ -103,17 +56,6 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
               }`}
             >
               {m.langSwitch}
-            </button>
-
-            <button
-              type="button"
-              className="md:hidden min-h-11 min-w-11 inline-flex items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50 transition-colors duration-150"
-              aria-expanded={mobileNavOpen}
-              aria-controls="marketing-mobile-nav"
-              onClick={() => setMobileNavOpen((o) => !o)}
-            >
-              {mobileNavOpen ? <X size={20} strokeWidth={1.75} aria-hidden /> : <Menu size={20} strokeWidth={1.75} aria-hidden />}
-              <span className="sr-only">{mobileNavOpen ? 'Close menu' : 'Open menu'}</span>
             </button>
 
             {isLoggedIn ? (
@@ -165,40 +107,6 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
               </>
             )}
           </div>
-        </div>
-
-        <div
-          id="marketing-mobile-nav"
-          className={`md:hidden border-neutral-200/80 bg-white overflow-hidden transition-[max-height] duration-300 ease-out ${
-            mobileNavOpen ? 'max-h-[22rem] border-t' : 'max-h-0 border-t-0'
-          }`}
-          aria-hidden={!mobileNavOpen}
-          inert={!mobileNavOpen ? true : undefined}
-        >
-          <nav className="max-w-5xl mx-auto px-6 py-6 flex flex-col" aria-label="Mobile">
-            {navLinks}
-            <div className="flex flex-col gap-2 pt-6 mt-4 border-t border-neutral-100">
-              <Link
-                to="/app/todo"
-                className="inline-flex min-h-11 items-center justify-center px-5 rounded-full text-[13px] font-medium bg-neutral-950 text-white"
-                onClick={() => setMobileNavOpen(false)}
-              >
-                {isLoggedIn ? m.workspace : m.startFree}
-              </Link>
-              {!isLoggedIn && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileNavOpen(false);
-                    login();
-                  }}
-                  className="inline-flex min-h-11 items-center justify-center px-5 rounded-full text-[13px] font-medium text-[#0071e3]"
-                >
-                  {m.logIn}
-                </button>
-              )}
-            </div>
-          </nav>
         </div>
       </header>
 

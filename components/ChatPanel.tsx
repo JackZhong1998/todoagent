@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
-import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight, Copy, Check } from 'lucide-react';
+import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight, Copy, Check, ImagePlus, Search } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { WorkspaceDoc } from '../types';
@@ -16,8 +16,12 @@ import {
   stripHtmlTags,
   SYSTEM_PROMPT,
 } from '../utils';
-import { AGENT_TOOLS_SYSTEM_PROMPT, KIMI_AGENT_TOOLS } from '../utils/kimiToolDefinitions';
-import { runKimiWithTools } from '../utils/kimiToolChat';
+import {
+  buildAgentToolsSystemPrompt,
+  KIMI_AGENT_TOOLS,
+  KIMI_AGENT_TOOLS_WITHOUT_WEB_SEARCH,
+} from '../utils/kimiToolDefinitions';
+import { runKimiWithTools, kimiUserMessageContent } from '../utils/kimiToolChat';
 import { createClerkSupabaseClient, isSupabaseConfigured } from '../utils/supabase/client';
 import {
   loadProjectConversations,
@@ -63,6 +67,9 @@ const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能�
 
 const MAX_SKILL_INJECT_CHARS = 80_000;
 const MOONSHOT_MODEL = import.meta.env.VITE_MOONSHOT_MODEL || 'kimi-k2.5';
+
+const MAX_CHAT_ATTACH_IMAGES = 4;
+const MAX_CHAT_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
 
 function formatWebSearchToolPayload(data: unknown, invokeError: { message: string } | null): string {
   if (invokeError) {
@@ -125,7 +132,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   );
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [pendingImageDataUrls, setPendingImageDataUrls] = useState<string[]>([]);
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatImageInputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     const el = inputTextareaRef.current;
@@ -325,9 +335,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   };
 
   const buildSystemPrompt = useCallback(
-    (includeToolInstructions: boolean, skillDocIds: string[]) => {
+    (includeToolInstructions: boolean, skillDocIds: string[], webSearch: boolean) => {
       let s = `${KIMI_SYSTEM_PROMPT}\n\n${SYSTEM_PROMPT}`;
-      if (includeToolInstructions) s += `\n\n${AGENT_TOOLS_SYSTEM_PROMPT}`;
+      if (includeToolInstructions) s += `\n\n${buildAgentToolsSystemPrompt({ webSearch })}`;
       s += buildSkillInjectionBlock(projectId, skillDocIds);
       return s;
     },
@@ -340,10 +350,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
 
     const apiMessages = [
-      { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds) },
+      { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds, false) },
       ...messages.map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.role === 'user' ? (m.apiContent || m.content) : m.content,
+        content: m.role === 'user' ? kimiUserMessageContent(m) : m.content,
       })),
     ];
 
@@ -369,9 +379,57 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return data.choices[0].message.content;
   };
 
+  const handlePickChatImages = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const fileList = Array.from(files);
+    e.target.value = '';
+
+    void (async () => {
+      const readFile = (file: File) =>
+        new Promise<string>((resolve, reject) => {
+          if (!file.type.startsWith('image/')) {
+            resolve('');
+            return;
+          }
+          if (file.size > MAX_CHAT_IMAGE_FILE_BYTES) {
+            resolve('');
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+
+      const additions: string[] = [];
+      for (const file of fileList) {
+        if (additions.length >= MAX_CHAT_ATTACH_IMAGES) break;
+        try {
+          const dataUrl = await readFile(file);
+          if (dataUrl) additions.push(dataUrl);
+        } catch {
+          /* skip broken read */
+        }
+      }
+      if (!additions.length) return;
+      setPendingImageDataUrls((prev) => {
+        const room = MAX_CHAT_ATTACH_IMAGES - prev.length;
+        if (room <= 0) return prev;
+        return [...prev, ...additions.slice(0, room)];
+      });
+    })();
+  }, []);
+
   const handleSendMessage = async (textOverride?: string) => {
     const rawText = (textOverride ?? inputText).trim();
-    if (!rawText || !currentConversationId || loadingConversationIds.includes(currentConversationId)) return;
+    const imageUrls = [...pendingImageDataUrls];
+    if (
+      (!rawText && !imageUrls.length) ||
+      !currentConversationId ||
+      loadingConversationIds.includes(currentConversationId)
+    )
+      return;
     const convBefore = conversations.find((c) => c.id === currentConversationId);
     const todoContext = initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
     let todoQuote = todoContext ? buildTodoQuote(todoContext, rawText) : undefined;
@@ -383,13 +441,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         todoQuote = undefined;
       }
     }
-    const apiContent = todoContext ? `${rawText}\n${buildTodoContextPrompt(todoContext)}` : rawText;
+    const userLine = rawText || (imageUrls.length ? ct.userBubbleImageLabel : '');
+    const apiContent = todoContext ? `${userLine}\n${buildTodoContextPrompt(todoContext)}` : userLine;
 
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
-      content: rawText,
+      content: userLine,
       apiContent,
+      imageDataUrls: imageUrls.length ? imageUrls : undefined,
       todoQuote,
       timestamp: Date.now()
     };
@@ -400,6 +460,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     addMessageToConversation(convId, userMessage);
     setInputText('');
+    setPendingImageDataUrls([]);
     setLoadingConversationIds((prev) => (prev.includes(convId) ? prev : [...prev, convId]));
     if (todoIdForCard && onTodoAgentCardStatusChange) {
       onTodoAgentCardStatusChange(todoIdForCard, convId, 'loading');
@@ -427,14 +488,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       }
 
       const messagesForApi = [...(convBefore?.messages ?? []), userMessage];
-      const messagesForModel = messagesForApi.map((m) =>
-        m.role === 'user' ? { ...m, content: m.apiContent || m.content } : m
-      );
+      const messagesForModel = messagesForApi;
 
       let response: string;
 
       if (canUseRemoteTools && supabase) {
         const client = supabase;
+        const allowWebSearch = webSearchEnabled;
         const executeTool = async (name: string, argsJson: string): Promise<string> => {
           let args: Record<string, unknown>;
           try {
@@ -510,9 +570,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         response = await runKimiWithTools({
           apiKey,
           model: MOONSHOT_MODEL,
-          getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current),
+          getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current, allowWebSearch),
           history: messagesForModel,
-          tools: [...KIMI_AGENT_TOOLS],
+          tools: allowWebSearch ? [...KIMI_AGENT_TOOLS] : [...KIMI_AGENT_TOOLS_WITHOUT_WEB_SEARCH],
           executeTool,
         });
       } else {
@@ -780,6 +840,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     </div>
                   ) : (
                     <div>
+                      {message.imageDataUrls?.length ? (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {message.imageDataUrls.map((src, idx) => (
+                            <img
+                              key={idx}
+                              src={src}
+                              alt=""
+                              className="max-h-28 max-w-[140px] rounded-lg object-cover border border-white/35"
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
                       {message.todoQuote ? (
                         <div className="mt-2 border-l-2 border-white/60 pl-2 text-[11px] leading-snug text-white/90">
@@ -809,6 +881,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       </div>
 
       <div className="p-4 border-t border-gray-100 bg-white flex-shrink-0">
+        {pendingImageDataUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {pendingImageDataUrls.map((src, idx) => (
+              <div key={idx} className="relative group">
+                <img
+                  src={src}
+                  alt=""
+                  className="h-16 w-16 rounded-lg object-cover border border-gray-200"
+                />
+                <button
+                  type="button"
+                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] font-bold text-white opacity-90 shadow hover:bg-black"
+                  aria-label="Remove"
+                  onClick={() =>
+                    setPendingImageDataUrls((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="flex gap-2">
           <textarea
             ref={inputTextareaRef}
@@ -823,16 +918,67 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             onClick={() => {
               void handleSendMessage();
             }}
-            disabled={!inputText.trim() || isCurrentConversationLoading}
+            disabled={
+              (!inputText.trim() && !pendingImageDataUrls.length) || isCurrentConversationLoading
+            }
             className={`
               px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center
-              ${inputText.trim() && !isCurrentConversationLoading
+              ${(inputText.trim() || pendingImageDataUrls.length) && !isCurrentConversationLoading
                 ? 'bg-black text-white hover:bg-zinc-800'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }
             `}
           >
             {isCurrentConversationLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          </button>
+        </div>
+        <div className="mt-2 flex items-center gap-1">
+          <input
+            ref={chatImageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handlePickChatImages}
+          />
+          <button
+            type="button"
+            className={`p-2 rounded-lg transition-colors text-gray-400 hover:text-gray-700 hover:bg-gray-100 ${
+              pendingImageDataUrls.length >= MAX_CHAT_ATTACH_IMAGES ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
+            disabled={pendingImageDataUrls.length >= MAX_CHAT_ATTACH_IMAGES}
+            title={ct.attachImageTooltip}
+            aria-label={ct.attachImageTooltip}
+            onClick={() => chatImageInputRef.current?.click()}
+          >
+            <ImagePlus size={18} />
+          </button>
+          <button
+            type="button"
+            disabled={!canUseRemoteTools}
+            className={`p-2 rounded-lg transition-colors ${
+              !canUseRemoteTools
+                ? 'cursor-not-allowed text-gray-200'
+                : webSearchEnabled
+                  ? 'text-black bg-gray-100'
+                  : 'text-gray-300 hover:bg-gray-50 hover:text-gray-500'
+            }`}
+            title={
+              !canUseRemoteTools
+                ? ct.agentToolsHint
+                : webSearchEnabled
+                  ? ct.webSearchOn
+                  : ct.webSearchOff
+            }
+            aria-pressed={canUseRemoteTools ? webSearchEnabled : undefined}
+            aria-label={
+              !canUseRemoteTools ? ct.agentToolsHint : webSearchEnabled ? ct.webSearchOn : ct.webSearchOff
+            }
+            onClick={() => {
+              if (canUseRemoteTools) setWebSearchEnabled((v) => !v);
+            }}
+          >
+            <Search size={18} strokeWidth={webSearchEnabled && canUseRemoteTools ? 2.25 : 1.65} />
           </button>
         </div>
         {!canUseRemoteTools ? (
