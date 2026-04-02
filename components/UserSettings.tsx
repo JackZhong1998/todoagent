@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,7 +34,18 @@ export const UserSettings: React.FC = () => {
   const { user } = useUser();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const t = settingsTranslations[language];
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = rootRef.current;
+      if (el && !el.contains(e.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [isOpen]);
 
   const goTo = (path: string) => {
     setIsOpen(false);
@@ -49,7 +60,7 @@ export const UserSettings: React.FC = () => {
   if (!isAuthLoaded || !isLoggedIn) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50">
+    <div ref={rootRef} className="fixed bottom-4 left-4 z-50">
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}

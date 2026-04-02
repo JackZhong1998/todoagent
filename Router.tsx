@@ -18,10 +18,10 @@ import { SolutionsDetailPage } from './pages/SolutionsDetailPage';
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || '';
 
 interface ProtectedAppRouteProps {
-  initialPage?: 'todo' | 'analysis';
+  children?: React.ReactNode;
 }
 
-const ProtectedAppRoute: React.FC<ProtectedAppRouteProps> = ({ initialPage = 'todo' }) => {
+const ProtectedAppRoute: React.FC<ProtectedAppRouteProps> = ({ children }) => {
   const { isAuthLoaded, isLoggedIn, requireLogin } = useAuth();
 
   useEffect(() => {
@@ -34,7 +34,7 @@ const ProtectedAppRoute: React.FC<ProtectedAppRouteProps> = ({ initialPage = 'to
   if (!isAuthLoaded) return null;
   if (!isLoggedIn) return <Navigate to="/" replace />;
 
-  return <AppShell initialPage={initialPage} />;
+  return <>{children}</>;
 };
 
 /** SPA：在 pathname/search 变化时向 GA4 上报 page_view（gtag 在 index.html 中已加载）。 */
@@ -56,8 +56,11 @@ const AppRouter: React.FC = () => {
           <GtagRouteListener />
           <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/app" element={<ProtectedAppRoute initialPage="todo" />} />
-            <Route path="/app/analysis" element={<ProtectedAppRoute initialPage="analysis" />} />
+            <Route path="/app" element={<Navigate to="/app/todo" replace />} />
+            <Route path="/app/todo" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
+            <Route path="/app/stats" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
+            <Route path="/app/docs" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
+            <Route path="/app/analysis" element={<Navigate to="/app/stats" replace />} />
             <Route path="/solutions" element={<SolutionsHubPage />} />
             <Route path="/solutions/:slug" element={<SolutionsDetailPage />} />
             <Route path="/blog" element={<BlogListPage />} />

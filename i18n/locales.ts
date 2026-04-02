@@ -18,6 +18,19 @@ export const translations = {
       noTitle: 'No title',
       newTodo: 'New Task',
       aiAssistant: 'AI Assistant',
+      todoEditor: {
+        insertFormat: 'Insert format',
+        h1: 'Heading 1',
+        h2: 'Heading 2',
+        h3: 'Heading 3',
+        bullet: 'Bullet list',
+        ordered: 'Numbered list',
+        bold: 'Bold',
+        strike: 'Strikethrough',
+        todoLine: 'Todo line',
+        image: 'Image (paste)',
+        codeBlock: 'Code block',
+      },
     },
     projects: {
       switchProject: 'Project',
@@ -42,6 +55,7 @@ export const translations = {
       delete: 'Remove',
       unsupportedFormat: 'Please use .md, .txt, or .docx.',
       parseError: 'Could not read this file.',
+      skillBadge: 'Skill',
     },
     chat: {
       scopeTodo: 'Task chat',
@@ -61,6 +75,8 @@ export const translations = {
       missingApiKey: 'Set VITE_MOONSHOT_API_KEY in your .env file first.',
       apiFailedPrefix: 'API request failed: ',
       resizeHandleTooltip: 'Drag to resize the chat panel',
+      agentToolsHint:
+        'Sign in with Supabase configured to enable web search, page fetch, and skill import from URLs.',
     },
     analysis: {
       entryTooltip: 'Task replaceability stats',
@@ -105,6 +121,12 @@ export const translations = {
       errorReasonAutoRetry:
         'The system will retry up to 2 times automatically. If it still fails, check your API key, balance, or network.',
       invalidJsonError: 'AI response was not valid JSON.',
+      tabReplaceability: 'AI replaceability',
+      tabSop: 'SOP analysis',
+      sopHint:
+        'Each completed task updates this Markdown SOP in one shot: previous SOP + new task → revised workflow doc (high vs low frequency, steps, human atomic capabilities).',
+      sopEmpty: 'Complete tasks to build your SOP. The document will appear here.',
+      sopUpdating: 'Updating SOP…',
     },
     marketing: {
       logoTagline: 'Your Agent for deep work together',
@@ -225,6 +247,15 @@ export const translations = {
         description:
           'Signed-in AI task analysis view. Private workspace content; not intended for search engine indexing.',
       },
+      appStats: {
+        title: 'Stats & analysis · TodoAgent',
+        description:
+          'Task replaceability and incremental SOP summary for your workspace. Private; not for search indexing.',
+      },
+      appDocs: {
+        title: 'Documents · TodoAgent',
+        description: 'Workspace documents and uploads in TodoAgent. Private workspace; not indexed.',
+      },
       solutionsHub: {
         title: 'Solutions & Use Cases | TodoAgent',
         description:
@@ -266,6 +297,19 @@ export const translations = {
       noTitle: '暂无标题',
       newTodo: '新任务',
       aiAssistant: 'AI 助手',
+      todoEditor: {
+        insertFormat: '插入格式',
+        h1: '一级标题',
+        h2: '二级标题',
+        h3: '三级标题',
+        bullet: '无序列表',
+        ordered: '有序列表',
+        bold: '加粗',
+        strike: '删除线',
+        todoLine: '待办样式行',
+        image: '图片（粘贴插入）',
+        codeBlock: '代码块',
+      },
     },
     projects: {
       switchProject: '项目',
@@ -290,6 +334,7 @@ export const translations = {
       delete: '删除',
       unsupportedFormat: '请使用 .md、.txt 或 .docx 文件',
       parseError: '无法解析该文件',
+      skillBadge: 'Skill',
     },
     chat: {
       scopeTodo: '任务专属对话',
@@ -309,6 +354,8 @@ export const translations = {
       missingApiKey: '请先在 .env 中设置 VITE_MOONSHOT_API_KEY',
       apiFailedPrefix: 'API 调用失败：',
       resizeHandleTooltip: '拖拽调整对话区宽度',
+      agentToolsHint:
+        '登录且已配置 Supabase 后，可使用联网搜索、网页抓取与从链接导入 Skill（需部署 Edge Function 并设置 BRAVE_API_KEY）。',
     },
     analysis: {
       entryTooltip: '任务可替代性统计',
@@ -349,6 +396,12 @@ export const translations = {
       errorProcessLead: 'AI 分析调用失败：',
       errorReasonAutoRetry: '系统会自动重试最多 2 次；若仍失败，请检查 API Key、余额或网络连接。',
       invalidJsonError: 'AI 返回格式不是有效 JSON。',
+      tabReplaceability: 'AI 替代性分析',
+      tabSop: 'SOP 分析',
+      sopHint:
+        '每完成一项待办会单次更新此 Markdown SOP：已有 SOP + 新完成任务 → 修订后的流程说明（高频/低频、步骤、人类原子能力等）。',
+      sopEmpty: '完成一些任务后，这里会逐步生成你的工作 SOP 文档。',
+      sopUpdating: '正在更新 SOP…',
     },
     marketing: {
       logoTagline: '与你在工作上紧密协作的 Agent',
@@ -463,6 +516,14 @@ export const translations = {
       appAnalysis: {
         title: '任务可替代性分析 · TodoAgent',
         description: '登录后查看的 AI 任务分析视图，内容为私人工作区数据，不参与搜索引擎收录。',
+      },
+      appStats: {
+        title: '统计与分析 · TodoAgent',
+        description: '任务可替代性统计与增量 SOP 总结。私人工作区，不参与搜索引擎收录。',
+      },
+      appDocs: {
+        title: '文档 · TodoAgent',
+        description: '工作区文档与上传文件。私人数据，不参与搜索引擎收录。',
       },
       solutionsHub: {
         title: '解决方案与场景 | TodoAgent',

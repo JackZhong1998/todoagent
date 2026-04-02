@@ -32,6 +32,10 @@ function docsKey(projectId: string) {
   return `todoagent_p_${projectId}_docs`;
 }
 
+function sopKey(projectId: string) {
+  return `todoagent_p_${projectId}_sop`;
+}
+
 function conversationsKey(projectId: string) {
   return `todoagent_p_${projectId}_conversations`;
 }
@@ -73,6 +77,22 @@ export function loadProjectDocs(projectId: string): WorkspaceDoc[] {
 
 export function saveProjectDocs(projectId: string, docs: WorkspaceDoc[]): void {
   localStorage.setItem(docsKey(projectId), JSON.stringify(docs));
+}
+
+export function loadProjectSop(projectId: string): string {
+  return localStorage.getItem(sopKey(projectId)) ?? '';
+}
+
+export function saveProjectSop(projectId: string, markdown: string): void {
+  localStorage.setItem(sopKey(projectId), markdown);
+}
+
+/** Cross-panel refresh when another view writes docs (e.g. chat imports a skill). */
+export const PROJECT_DOCS_UPDATED_EVENT = 'todoagent-project-docs-updated';
+
+export function notifyProjectDocsUpdated(projectId: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(PROJECT_DOCS_UPDATED_EVENT, { detail: { projectId } }));
 }
 
 export function loadProjectConversations(projectId: string): Conversation[] {
@@ -144,6 +164,7 @@ export function ensureProjectsWithMigration(defaultProjectName?: string): Projec
     saveProjectTodos(id, []);
     saveProjectAnalysis(id, {});
     saveProjectDocs(id, []);
+    saveProjectSop(id, '');
     saveProjectConversations(id, []);
   }
 
@@ -155,5 +176,6 @@ export function seedEmptyWorkspace(projectId: string): void {
   if (!localStorage.getItem(todosKey(projectId))) saveProjectTodos(projectId, []);
   if (!localStorage.getItem(analysisKey(projectId))) saveProjectAnalysis(projectId, {});
   if (!localStorage.getItem(docsKey(projectId))) saveProjectDocs(projectId, []);
+  if (localStorage.getItem(sopKey(projectId)) === null) saveProjectSop(projectId, '');
   if (!localStorage.getItem(conversationsKey(projectId))) saveProjectConversations(projectId, []);
 }

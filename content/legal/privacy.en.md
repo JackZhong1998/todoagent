@@ -2,7 +2,7 @@
 
 **Effective date: April 1, 2026**
 
-**Last updated: April 1, 2026**
+**Last updated: April 2, 2026**
 
 ## 1. General
 
@@ -32,7 +32,7 @@ This Policy applies to the Operator’s processing of your personal information 
 
 ### 2.2
 
-The Service relies on third-party services (such as authentication, hosting, and AI inference). Those third parties process information under their own privacy policies. Section 6 summarizes their roles; **you should read their full policies**.
+The Service relies on third-party services (such as authentication, hosting, cloud database and sync, and AI inference). Those third parties process information under their own privacy policies. Section 6 summarizes their roles; **you should read their full policies**.
 
 ---
 
@@ -71,17 +71,24 @@ We **do not** use your User Content for unrelated commercial profiling or sell i
 
 ---
 
-## 5. Local storage (in your browser)
+## 5. How we store data (browser and cloud sync)
 
 ### 5.1
 
-To provide a continuous experience, **much of your task text, Agent conversations, document content, and some analytical data is stored locally in your browser** using **localStorage**, rather than being fully hosted long-term on servers operated by the Operator.
+To provide a continuous experience, the Service uses **local storage in your browser** and, when you are **signed in** and we have enabled it, a **third-party hosted database** (currently **Supabase**) to store User Content related to tasks, documents, the AI assistant (Agent), and analysis features—including **task text and status, document content, chat history, and certain analysis results**.
+
+- **Local storage (localStorage):** Used for fast loading and basic availability when you are not signed in or when the network is unavailable; **a local copy of some or all of this information may remain on your device**.
+- **Cloud sync (Supabase):** When you are signed in and cloud sync is configured, we transmit User Content over a **secure connection (such as HTTPS)** so it can be **stored with Supabase** and associated with your account identity managed by **Clerk**, enabling **consistent use across devices, backup, and continuity**.
 
 ### 5.2
 
-**You control local data.** Clearing Site data, browser storage, or uninstalling the browser may **permanently delete** local information **without recovery**. You are responsible for backing up anything important.
+**Clearing Site or browser data** generally removes or clears **local copies** on your device but **does not automatically delete** copies already stored in the cloud. To address cloud-held data, **contact us** or follow Section 8 and your Clerk account tools as applicable. **You should keep your own backups** of anything important.
 
 ### 5.3
+
+Security practices, subprocessors, and regions for cloud storage are described by **Supabase** and its infrastructure providers (see Section 6). **The Operator does not own or physically control those servers** but selects services and configures access in a commercially reasonable manner.
+
+### 5.4
 
 The Service **does not currently use cookies** to store that core User Content. If we later use cookies or similar technologies for necessary functions (e.g., language preference, compliance notices), we will update this Policy accordingly.
 
@@ -97,11 +104,15 @@ We use Clerk for sign-in with email, Apple, and Google. Clerk processes **accoun
 
 The Site runs on Vercel infrastructure. Vercel may process **access logs and technical request data**. See: **https://vercel.com/legal/privacy-policy**
 
-### 6.3 **Moonshot (AI inference)**
+### 6.3 **Supabase (cloud database and sync)**
+
+When you are signed in and use cloud sync, we use **Supabase** to host a database that **stores and syncs** portions of your User Content (such as tasks, documents, conversations, and analysis results). **Supabase and its underlying infrastructure providers may process data outside your country.** See Supabase’s privacy policy: **https://supabase.com/privacy**
+
+### 6.4 **Moonshot (AI inference)**
 
 AI features call **Moonshot** APIs (e.g. **https://api.moonshot.cn**). When you use the assistant, **portions of your input (which may include excerpts from tasks, documents, or chat)** are **sent to Moonshot’s servers** for inference. Moonshot’s processing is governed by its terms and privacy policy; please read the latest documents on its official website.
 
-### 6.4
+### 6.5
 
 **Please read third-party policies carefully.** If you do not accept how a third party processes data, do not use features that depend on that third party or stop using the Service.
 
@@ -111,7 +122,7 @@ AI features call **Moonshot** APIs (e.g. **https://api.moonshot.cn**). When you 
 
 ### 7.1
 
-Because we serve users globally and use services from providers that may operate outside mainland China (such as Clerk and Vercel), **some personal or technical information may be transferred to or processed outside your country**, as determined by each provider’s architecture.
+Because we serve users globally and use services from providers that may operate outside mainland China (such as Clerk, Vercel, and Supabase), **some personal information, User Content, or technical information may be transferred to or processed outside your country**, as determined by each provider’s architecture.
 
 ### 7.2
 
@@ -125,11 +136,15 @@ Where the law requires separate consent or other measures for cross-border trans
 
 When you delete your account, we will **promptly take reasonable steps** to have **Clerk delete or anonymize data tied to your account**, subject to Clerk’s own timelines and policies.
 
-### 8.2 **Local storage**
+### 8.2 **Cloud sync (e.g., Supabase)**
 
-Data in your browser’s **localStorage** is **not remotely erased by the Operator**; you delete it by **clearing Site/browser data**. We recommend backing up before you stop using the Service.
+User Content associated with your signed-in account and stored in the cloud is held **by Supabase and related providers**. If you submit a **lawful deletion request** to us or **delete your account** through Clerk, we will **take reasonable steps to delete or anonymize** that cloud-held User Content, subject to technical limits and the providers’ processing timelines. **Complete erasure may be limited by backups, audits, or legal retention requirements**; we will act within what the law allows.
 
-### 8.3 **Legal retention**
+### 8.3 **Local storage**
+
+Data in your browser’s **localStorage** (and similar storage) is **not wiped remotely by the Operator** in the same way as cloud data; you remove local copies by **clearing Site or browser data**. We recommend backing up before you stop using the Service.
+
+### 8.4 **Legal retention**
 
 We may retain certain information where required by law, dispute resolution, or regulatory requests.
 

@@ -1,4 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Todo } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -35,6 +37,9 @@ interface AIAnalysisPageProps {
   onBack?: () => void;
   /** Hide top bar with back button (e.g. when shown inside app tab). */
   embedded?: boolean;
+  /** Incremental SOP Markdown (stats tab, second sub-tab). */
+  sopMarkdown?: string;
+  sopLoading?: boolean;
 }
 
 /** Stored in cache when analysis API fails; keep stable for retry logic. */
@@ -112,9 +117,12 @@ export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
   analysisLoadingByTodoId,
   onBack,
   embedded = false,
+  sopMarkdown = '',
+  sopLoading = false,
 }) => {
   const { t } = useLanguage();
   const a = t.analysis;
+  const [statsSubTab, setStatsSubTab] = useState<'replaceability' | 'sop'>('replaceability');
   const completedTodos = useMemo(
     () => todos.filter((todo) => todo.isCompleted).sort((a, b) => b.createdAt - a.createdAt),
     [todos]
@@ -131,26 +139,8 @@ export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
 
   const pct = (n: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '0%');
 
-  return (
-    <div className="space-y-6">
-      {embedded ? (
-        <p className="text-xs text-gray-400 leading-relaxed bg-white border border-gray-100 rounded-2xl px-5 py-4">
-          {a.headerHint}
-        </p>
-      ) : (
-        <div className="flex items-center justify-between bg-white border border-gray-100 rounded-2xl px-5 py-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
-          >
-            <ArrowLeft size={16} />
-            {a.backToTodo}
-          </button>
-          <div className="text-xs text-gray-400 max-w-md text-right leading-relaxed">{a.headerHint}</div>
-        </div>
-      )}
-
+  const replaceabilitySection = (
+    <>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-100 rounded-2xl p-5">
           <div className="text-xs text-gray-400 uppercase tracking-wider">{a.statCompleted}</div>
@@ -308,6 +298,77 @@ export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
           })
         )}
       </div>
+    </>
+  );
+
+  return (
+    <div className="space-y-6">
+      {embedded ? (
+        <div className="space-y-3">
+          <div className="flex p-1 bg-gray-100/80 rounded-xl w-full max-w-md">
+            <button
+              type="button"
+              onClick={() => setStatsSubTab('replaceability')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                statsSubTab === 'replaceability'
+                  ? 'bg-white text-black shadow-sm'
+                  : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              {a.tabReplaceability}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatsSubTab('sop')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                statsSubTab === 'sop' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              {a.tabSop}
+            </button>
+          </div>
+          {statsSubTab === 'replaceability' ? (
+            <p className="text-xs text-gray-400 leading-relaxed bg-white border border-gray-100 rounded-2xl px-5 py-4">
+              {a.headerHint}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 leading-relaxed bg-white border border-gray-100 rounded-2xl px-5 py-4">
+              {a.sopHint}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between bg-white border border-gray-100 rounded-2xl px-5 py-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
+          >
+            <ArrowLeft size={16} />
+            {a.backToTodo}
+          </button>
+          <div className="text-xs text-gray-400 max-w-md text-right leading-relaxed">{a.headerHint}</div>
+        </div>
+      )}
+
+      {embedded && statsSubTab === 'sop' ? (
+        <div className="bg-white border border-gray-100 rounded-2xl p-6 md:p-8 min-h-[240px]">
+          {sopLoading ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Loader2 size={16} className="animate-spin shrink-0" />
+              {a.sopUpdating}
+            </div>
+          ) : sopMarkdown.trim() ? (
+            <article className="prose prose-sm prose-gray max-w-none prose-headings:font-semibold prose-a:text-blue-600">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{sopMarkdown}</ReactMarkdown>
+            </article>
+          ) : (
+            <p className="text-sm text-gray-400">{a.sopEmpty}</p>
+          )}
+        </div>
+      ) : (
+        replaceabilitySection
+      )}
     </div>
   );
 };

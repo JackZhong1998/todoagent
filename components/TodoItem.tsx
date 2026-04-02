@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lucide-react';
+import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot, Plus } from 'lucide-react';
+import { htmlToMarkdown } from '../utils/htmlToMarkdown';
 import { Todo, Priority } from '../types';
 import { formatDuration, formatFullDateTimeShort, formatDeadlineShort } from '../utils';
 import { PriorityBadge } from './PriorityBadge';
@@ -16,6 +17,7 @@ interface TodoItemProps {
 
 export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false, onOpenChat }) => {
   const { t } = useLanguage();
+  const te = t.app.todoEditor;
   const [currentTime, setCurrentTime] = useState(todo.totalTime);
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -25,6 +27,9 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [deadlineTime, setDeadlineTime] = useState<string>('');
+  const [formatMenuOpen, setFormatMenuOpen] = useState(false);
+  const [gutterTop, setGutterTop] = useState<number | null>(null);
+  const formatMenuRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -69,6 +74,53 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (!formatMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = formatMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setFormatMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [formatMenuOpen]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed || !isEditing) {
+      setGutterTop(null);
+      return;
+    }
+    const updateGutter = () => {
+      if (document.activeElement !== ed) {
+        setGutterTop(null);
+        return;
+      }
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      let rect = range.getBoundingClientRect();
+      if (rect.height === 0 && range.startContainer.nodeType === Node.TEXT_NODE) {
+        const r2 = document.createRange();
+        const node = range.startContainer;
+        const len = (node.textContent || '').length;
+        const off = Math.min(range.startOffset, len);
+        r2.setStart(node, off);
+        r2.setEnd(node, off);
+        rect = r2.getBoundingClientRect();
+      }
+      const er = ed.getBoundingClientRect();
+      const top = rect.top - er.top + ed.scrollTop;
+      setGutterTop(Number.isFinite(top) ? top : null);
+    };
+    updateGutter();
+    document.addEventListener('selectionchange', updateGutter);
+    ed.addEventListener('scroll', updateGutter, { passive: true });
+    return () => {
+      document.removeEventListener('selectionchange', updateGutter);
+      ed.removeEventListener('scroll', updateGutter);
+    };
+  }, [isEditing, todo.id]);
 
   // 计时器逻辑
   useEffect(() => {
@@ -149,7 +201,34 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     onUpdate(todo.id, { priority: nextPriority });
   };
 
+  const applyFormat = useCallback(
+    (action: () => void) => {
+      if (!editorRef.current) return;
+      editorRef.current.focus();
+      action();
+      setFormatMenuOpen(false);
+      saveContent();
+    },
+    [saveContent]
+  );
+
+  const handleCopy = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      if (!editorRef.current) return;
+      const md = htmlToMarkdown(editorRef.current.innerHTML);
+      e.clipboardData.setData('text/plain', md);
+      e.clipboardData.setData('text/html', editorRef.current.innerHTML);
+      e.preventDefault();
+    },
+    []
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      document.execCommand('bold');
+      return;
+    }
     if (e.key === 'Enter') {
       const selection = window.getSelection();
       const anchorNode = selection?.anchorNode;
@@ -194,12 +273,17 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         if (h2) {
           h2.className = 'text-2xl font-semibold text-gray-500 mt-5 mb-3 leading-snug';
         }
-      } else if (trimmedText === '-') {
+      } else if (trimmedText === '-' || trimmedText === '*') {
         node.textContent = '';
         document.execCommand('insertUnorderedList');
-      } else if (trimmedText === '1.') {
+      } else if (/^\d+\.$/.test(trimmedText)) {
         node.textContent = '';
         document.execCommand('insertOrderedList');
+      } else if (trimmedText === '[]') {
+        node.textContent = '';
+        const todoHtml =
+          '<p class="flex items-start gap-2 my-1"><span class="todo-md-check select-none text-gray-500 font-mono text-sm" contenteditable="false">[ ]</span><span>\u00A0</span></p>';
+        document.execCommand('insertHTML', false, todoHtml);
       } else if (trimmedText === '```') {
         node.textContent = '';
         const pre = document.createElement('pre');
@@ -270,7 +354,51 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           )}
         </button>
 
-        <div className="flex-1 min-w-0 relative">
+        <div className="flex-1 min-w-0 relative pl-7">
+          {isEditing && gutterTop !== null ? (
+            <button
+              type="button"
+              className="absolute left-0 z-20 w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-800 shadow-sm"
+              style={{ top: gutterTop, transform: 'translateY(1px)' }}
+              title={te.insertFormat}
+              aria-label={te.insertFormat}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setFormatMenuOpen((v) => !v);
+              }}
+            >
+              <Plus size={14} strokeWidth={2.5} />
+            </button>
+          ) : null}
+          {formatMenuOpen && gutterTop !== null ? (
+            <div
+              ref={formatMenuRef}
+              className="absolute left-0 z-30 w-56 rounded-xl border border-gray-100 bg-white shadow-xl py-1.5 text-left"
+              style={{ top: gutterTop + 30 }}
+            >
+              <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{te.insertFormat}</div>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H1'))}>{te.h1}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H2'))}>{te.h2}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H3'))}>{te.h3}</button>
+              <div className="h-px bg-gray-100 my-1 mx-2" />
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertUnorderedList'))}>{te.bullet}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertOrderedList'))}>{te.ordered}</button>
+              <div className="h-px bg-gray-100 my-1 mx-2" />
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('bold'))}>{te.bold}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('strikeThrough'))}>{te.strike}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertHTML', false, '<p class="flex items-start gap-2 my-1"><span class="todo-md-check select-none text-gray-500 font-mono text-sm" contenteditable="false">[ ]</span><span>\u00A0</span></p>'))}>{te.todoLine}</button>
+              <div className="h-px bg-gray-100 my-1 mx-2" />
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-500" onMouseDown={(e) => e.preventDefault()} onClick={() => { setFormatMenuOpen(false); editorRef.current?.focus(); }}>{te.image}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => {
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                code.innerHTML = '<br>';
+                pre.appendChild(code);
+                pre.className = 'bg-gray-50 text-gray-800 p-4 rounded-lg my-3 font-mono text-sm border border-gray-100 overflow-x-auto block';
+                document.execCommand('insertHTML', false, pre.outerHTML);
+              })}>{te.codeBlock}</button>
+            </div>
+          ) : null}
           <div className="absolute top-0 right-0 flex items-center gap-3 z-10 bg-white/50 backdrop-blur-sm pl-2 rounded-bl-lg">
             <PriorityBadge 
               priority={todo.priority} 
@@ -290,9 +418,14 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             onInput={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
+            onCopy={handleCopy}
             onClick={handleImageClick}
             onFocus={() => setIsEditing(true)}
-            onBlur={() => { setIsEditing(false); saveContent(); }}
+            onBlur={() => {
+              setIsEditing(false);
+              setFormatMenuOpen(false);
+              saveContent();
+            }}
             className={`
               w-full outline-none text-[15px] leading-7 font-normal text-[#37352f] pr-36
               
@@ -317,6 +450,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             [&_img]:block [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-2 [&_img]:shadow-sm [&_img]:transition-all
             [&_img]:cursor-pointer [&_img]:hover:shadow-md [&_img]:border [&_img]:border-transparent [&_img]:hover:border-blue-200
             [&_.float-left]:float-left [&_.float-left]:mr-6 [&_.float-left]:mb-2
+            [&_.todo-md-check]:shrink-0
           `}
           data-placeholder="新任务"
           spellCheck={false}

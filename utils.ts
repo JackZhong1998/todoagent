@@ -16,6 +16,18 @@ export const formatDuration = (seconds: number): string => {
 
 export const generateId = () => Math.random().toString(36).substring(2, 9);
 
+/** Suggested filename for a skill imported from a URL (e.g. GitHub raw path segment). */
+export const skillDocumentNameFromUrl = (urlStr: string): string => {
+  try {
+    const u = new URL(urlStr.trim());
+    const parts = u.pathname.split('/').filter(Boolean);
+    const last = parts[parts.length - 1] || 'skill.md';
+    return decodeURIComponent(last).slice(0, 120) || 'skill.md';
+  } catch {
+    return 'skill.md';
+  }
+};
+
 export const saveTodos = (todos: any[]) => {
   localStorage.setItem('swiss_todos', JSON.stringify(todos));
 };
