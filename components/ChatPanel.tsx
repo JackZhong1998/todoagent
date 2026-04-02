@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
-import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight } from 'lucide-react';
+import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight, Copy, Check, ImagePlus, Search } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { WorkspaceDoc } from '../types';
@@ -16,8 +16,12 @@ import {
   stripHtmlTags,
   SYSTEM_PROMPT,
 } from '../utils';
-import { AGENT_TOOLS_SYSTEM_PROMPT, KIMI_AGENT_TOOLS } from '../utils/kimiToolDefinitions';
-import { runKimiWithTools } from '../utils/kimiToolChat';
+import {
+  buildAgentToolsSystemPrompt,
+  KIMI_AGENT_TOOLS,
+  KIMI_AGENT_TOOLS_WITHOUT_WEB_SEARCH,
+} from '../utils/kimiToolDefinitions';
+import { runKimiWithTools, kimiUserMessageContent } from '../utils/kimiToolChat';
 import { createClerkSupabaseClient, isSupabaseConfigured } from '../utils/supabase/client';
 import {
   loadProjectConversations,
@@ -42,13 +46,30 @@ interface ChatPanelProps {
   width: number;
   onClose: () => void;
   initialTodo?: Todo;
+  launchPayload?: {
+    nonce: number;
+    text?: string;
+    autoSend?: boolean;
+    forceNewConversation?: boolean;
+    conversationId?: string;
+    focusConversationId?: string;
+  } | null;
   onNewGlobalChat: () => void;
+  onTodoAgentCardResolved?: (todoId: string, conversationId: string) => void;
+  onTodoAgentCardStatusChange?: (
+    todoId: string,
+    conversationId: string,
+    state: 'loading' | 'answered'
+  ) => void;
 }
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
 
 const MAX_SKILL_INJECT_CHARS = 80_000;
 const MOONSHOT_MODEL = import.meta.env.VITE_MOONSHOT_MODEL || 'kimi-k2.5';
+
+const MAX_CHAT_ATTACH_IMAGES = 4;
+const MAX_CHAT_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
 
 function formatWebSearchToolPayload(data: unknown, invokeError: { message: string } | null): string {
   if (invokeError) {
@@ -96,7 +117,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   width,
   onClose,
   initialTodo,
+  launchPayload,
   onNewGlobalChat,
+  onTodoAgentCardResolved,
+  onTodoAgentCardStatusChange,
 }) => {
   const { t, language } = useLanguage();
   const { isLoggedIn, getClerkToken } = useAuth();
@@ -108,7 +132,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   );
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [pendingImageDataUrls, setPendingImageDataUrls] = useState<string[]>([]);
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatImageInputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     const el = inputTextareaRef.current;
@@ -119,8 +146,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     el.style.height = `${Math.min(el.scrollHeight, maxInner + 24)}px`;
   }, [inputText]);
   const [showHistory, setShowHistory] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingConversationIds, setLoadingConversationIds] = useState<string[]>([]);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastLaunchNonceRef = useRef<number | null>(null);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+  const autoSendDoneForNonceRef = useRef<number | null>(null);
   /** Tracks skill ids for the in-flight request (updates synchronously on import_skill). */
   const skillAttachRef = useRef<string[]>([]);
   const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
@@ -137,6 +169,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       ? conversations.find(c => c.id === currentConversationId) 
       : null;
   }, [currentConversationId, conversations]);
+  const isCurrentConversationLoading = !!currentConversationId && loadingConversationIds.includes(currentConversationId);
 
   const globalConversations = conversations.filter(c => !c.todoId);
   const todoConversations = conversations.filter(c => c.todoId);
@@ -145,33 +178,130 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return plainContent || todo.title || '';
   };
 
-  useEffect(() => {
-    if (isOpen) {
-      if (initialTodo) {
-        const existingTodoConversation = conversations.find(c => c.todoId === initialTodo.id);
-        if (existingTodoConversation) {
-          setCurrentConversationId(existingTodoConversation.id);
-          setInputText(getTodoInputText(initialTodo));
-        } else {
-          const newConversation: Conversation = {
-            id: generateId(),
-            title: initialTodo.title || ct.newTodoTitle,
-            messages: [],
-            todoId: initialTodo.id,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          };
-          const updatedConversations = [newConversation, ...conversations];
-          setConversations(updatedConversations);
-          setCurrentConversationId(newConversation.id);
-          
-          setInputText(getTodoInputText(initialTodo));
-        }
-      } else {
-        createNewGlobalConversation();
-      }
+  const buildTodoQuote = useCallback((todo: Todo, userLine?: string) => {
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const titleRaw = (todo.title || t.app.noTitle).trim();
+    const title = titleRaw;
+    const u = userLine !== undefined ? norm(userLine) : '';
+    const plain = stripHtmlTags(todo.content || '').trim();
+    const lines = plain.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+    const titleN = norm(titleRaw);
+    const isTitleLine = (l: string) => {
+      const ln = norm(l);
+      return ln === titleN || ln.startsWith(titleN);
+    };
+
+    let bodyHint = lines.find((l) => l && !isTitleLine(l)) || '';
+    if (!bodyHint && lines[0] && lines[0].startsWith(titleRaw) && lines[0].length > titleRaw.length) {
+      bodyHint = lines[0].slice(titleRaw.length).trim();
     }
-  }, [isOpen, initialTodo?.id]);
+
+    let firstLine = bodyHint.slice(0, 120);
+    const b = norm(bodyHint);
+    if (u && b && (b === u || u.includes(b) || b.includes(u))) {
+      firstLine = '';
+    }
+
+    return { title, firstLine };
+  }, [t.app.noTitle]);
+
+  const buildTodoContextPrompt = useCallback((todo: Todo) => {
+    const plain = stripHtmlTags(todo.content || '').trim();
+    const title = (todo.title || t.app.noTitle).trim();
+    return [
+      '',
+      '---',
+      'Todo Background:',
+      `Title: ${title}`,
+      'Body:',
+      plain || '(empty)',
+      '---',
+      '',
+      'Use the Todo background as context for this turn.',
+    ].join('\n');
+  }, [t.app.noTitle]);
+
+  const createNewGlobalConversation = useCallback(() => {
+    const newConversation: Conversation = {
+      id: generateId(),
+      title: ct.newGlobalTitle,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setConversations((prev) => [newConversation, ...prev]);
+    setCurrentConversationId(newConversation.id);
+    setShowHistory(false);
+    setInputText('');
+  }, [ct.newGlobalTitle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (!initialTodo) {
+      createNewGlobalConversation();
+      return;
+    }
+
+    const lp = launchPayload ?? undefined;
+    const convs = conversationsRef.current;
+
+    if (lp?.focusConversationId) {
+      if (convs.some((c) => c.id === lp.focusConversationId)) {
+        setCurrentConversationId(lp.focusConversationId);
+        setInputText('');
+      }
+      lastLaunchNonceRef.current = lp.nonce;
+      return;
+    }
+
+    const shouldForceNew =
+      Boolean(lp?.forceNewConversation) && lp.nonce !== lastLaunchNonceRef.current;
+
+    if (shouldForceNew) {
+      const newId = lp?.conversationId || generateId();
+      setConversations((prev) => {
+        if (prev.some((c) => c.id === newId)) return prev;
+        const newConversation: Conversation = {
+          id: newId,
+          title: initialTodo.title || ct.newTodoTitle,
+          messages: [],
+          todoId: initialTodo.id,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        return [newConversation, ...prev];
+      });
+      setCurrentConversationId(newId);
+      setInputText(lp?.autoSend ? '' : typeof lp?.text === 'string' ? lp.text : '');
+      lastLaunchNonceRef.current = lp.nonce;
+      return;
+    }
+
+    const forTodo = convs
+      .filter((c) => c.todoId === initialTodo.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    if (forTodo[0]) {
+      setCurrentConversationId(forTodo[0].id);
+      setInputText(lp?.text ?? getTodoInputText(initialTodo));
+    } else {
+      const newId = generateId();
+      const newConversation: Conversation = {
+        id: newId,
+        title: initialTodo.title || ct.newTodoTitle,
+        messages: [],
+        todoId: initialTodo.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setConversations((prev) => [newConversation, ...prev]);
+      setCurrentConversationId(newId);
+      setInputText(lp?.text ?? getTodoInputText(initialTodo));
+    }
+    if (lp?.nonce) lastLaunchNonceRef.current = lp.nonce;
+  }, [isOpen, initialTodo?.id, launchPayload, createNewGlobalConversation]);
 
   useEffect(() => {
     saveProjectConversations(projectId, conversations);
@@ -180,22 +310,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentConversation, isLoading]);
-
-  const createNewGlobalConversation = () => {
-    const newConversation: Conversation = {
-      id: generateId(),
-      title: ct.newGlobalTitle,
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
-    const updatedConversations = [newConversation, ...conversations];
-    setConversations(updatedConversations);
-    setCurrentConversationId(newConversation.id);
-    setShowHistory(false);
-    setInputText('');
-  };
+  }, [currentConversation, isCurrentConversationLoading]);
 
   const addMessageToConversation = (conversationId: string, message: Message) => {
     setConversations(prev => prev.map(c => {
@@ -220,9 +335,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   };
 
   const buildSystemPrompt = useCallback(
-    (includeToolInstructions: boolean, skillDocIds: string[]) => {
+    (includeToolInstructions: boolean, skillDocIds: string[], webSearch: boolean) => {
       let s = `${KIMI_SYSTEM_PROMPT}\n\n${SYSTEM_PROMPT}`;
-      if (includeToolInstructions) s += `\n\n${AGENT_TOOLS_SYSTEM_PROMPT}`;
+      if (includeToolInstructions) s += `\n\n${buildAgentToolsSystemPrompt({ webSearch })}`;
       s += buildSkillInjectionBlock(projectId, skillDocIds);
       return s;
     },
@@ -235,8 +350,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
 
     const apiMessages = [
-      { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds) },
-      ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds, false) },
+      ...messages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.role === 'user' ? kimiUserMessageContent(m) : m.content,
+      })),
     ];
 
     const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
@@ -261,43 +379,122 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return data.choices[0].message.content;
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim() || !currentConversationId || isLoading) return;
+  const handlePickChatImages = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const fileList = Array.from(files);
+    e.target.value = '';
+
+    void (async () => {
+      const readFile = (file: File) =>
+        new Promise<string>((resolve, reject) => {
+          if (!file.type.startsWith('image/')) {
+            resolve('');
+            return;
+          }
+          if (file.size > MAX_CHAT_IMAGE_FILE_BYTES) {
+            resolve('');
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+
+      const additions: string[] = [];
+      for (const file of fileList) {
+        if (additions.length >= MAX_CHAT_ATTACH_IMAGES) break;
+        try {
+          const dataUrl = await readFile(file);
+          if (dataUrl) additions.push(dataUrl);
+        } catch {
+          /* skip broken read */
+        }
+      }
+      if (!additions.length) return;
+      setPendingImageDataUrls((prev) => {
+        const room = MAX_CHAT_ATTACH_IMAGES - prev.length;
+        if (room <= 0) return prev;
+        return [...prev, ...additions.slice(0, room)];
+      });
+    })();
+  }, []);
+
+  const handleSendMessage = async (textOverride?: string) => {
+    const rawText = (textOverride ?? inputText).trim();
+    const imageUrls = [...pendingImageDataUrls];
+    if (
+      (!rawText && !imageUrls.length) ||
+      !currentConversationId ||
+      loadingConversationIds.includes(currentConversationId)
+    )
+      return;
+    const convBefore = conversations.find((c) => c.id === currentConversationId);
+    const todoContext = initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
+    let todoQuote = todoContext ? buildTodoQuote(todoContext, rawText) : undefined;
+    if (todoQuote) {
+      const t = todoQuote.title.trim();
+      const f = todoQuote.firstLine.trim();
+      const r = rawText.trim();
+      if ((!f && r === t) || (f && r === f)) {
+        todoQuote = undefined;
+      }
+    }
+    const userLine = rawText || (imageUrls.length ? ct.userBubbleImageLabel : '');
+    const apiContent = todoContext ? `${userLine}\n${buildTodoContextPrompt(todoContext)}` : userLine;
 
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
-      content: inputText,
+      content: userLine,
+      apiContent,
+      imageDataUrls: imageUrls.length ? imageUrls : undefined,
+      todoQuote,
       timestamp: Date.now()
     };
 
     const convId = currentConversationId;
-    const convBefore = conversations.find((c) => c.id === convId);
     skillAttachRef.current = [...(convBefore?.attachedSkillDocIds ?? [])];
+    const todoIdForCard = convBefore?.todoId || initialTodo?.id;
 
     addMessageToConversation(convId, userMessage);
     setInputText('');
-    setIsLoading(true);
-
-    if (!apiKey) {
-      setIsLoading(false);
-      const err: Message = {
-        id: generateId(),
-        role: 'assistant',
-        content: ct.missingApiKey,
-        timestamp: Date.now(),
-      };
-      addMessageToConversation(convId, err);
-      return;
+    setPendingImageDataUrls([]);
+    setLoadingConversationIds((prev) => (prev.includes(convId) ? prev : [...prev, convId]));
+    if (todoIdForCard && onTodoAgentCardStatusChange) {
+      onTodoAgentCardStatusChange(todoIdForCard, convId, 'loading');
     }
 
-    const messagesForApi = [...(convBefore?.messages ?? []), userMessage];
+    const finishAgentCard = () => {
+      if (todoIdForCard && onTodoAgentCardStatusChange) {
+        onTodoAgentCardStatusChange(todoIdForCard, convId, 'answered');
+      }
+      if (todoIdForCard && onTodoAgentCardResolved) {
+        onTodoAgentCardResolved(todoIdForCard, convId);
+      }
+    };
 
     try {
+      if (!apiKey) {
+        const err: Message = {
+          id: generateId(),
+          role: 'assistant',
+          content: ct.missingApiKey,
+          timestamp: Date.now(),
+        };
+        addMessageToConversation(convId, err);
+        return;
+      }
+
+      const messagesForApi = [...(convBefore?.messages ?? []), userMessage];
+      const messagesForModel = messagesForApi;
+
       let response: string;
 
       if (canUseRemoteTools && supabase) {
         const client = supabase;
+        const allowWebSearch = webSearchEnabled;
         const executeTool = async (name: string, argsJson: string): Promise<string> => {
           let args: Record<string, unknown>;
           try {
@@ -373,13 +570,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         response = await runKimiWithTools({
           apiKey,
           model: MOONSHOT_MODEL,
-          getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current),
-          history: messagesForApi,
-          tools: [...KIMI_AGENT_TOOLS],
+          getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current, allowWebSearch),
+          history: messagesForModel,
+          tools: allowWebSearch ? [...KIMI_AGENT_TOOLS] : [...KIMI_AGENT_TOOLS_WITHOUT_WEB_SEARCH],
           executeTool,
         });
       } else {
-        response = await callKimiAPIPlain(messagesForApi, skillAttachRef.current);
+        response = await callKimiAPIPlain(messagesForModel, skillAttachRef.current);
       }
 
       const assistantMessage: Message = {
@@ -400,9 +597,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       };
       addMessageToConversation(convId, errorMessage);
     } finally {
-      setIsLoading(false);
+      setLoadingConversationIds((prev) => prev.filter((id) => id !== convId));
+      finishAgentCard();
     }
   };
+
+  useEffect(() => {
+    if (!isOpen || !launchPayload?.autoSend || !launchPayload.text) return;
+    if (launchPayload.focusConversationId) return;
+    if (!launchPayload.conversationId || !launchPayload.forceNewConversation) return;
+    if (autoSendDoneForNonceRef.current === launchPayload.nonce) return;
+    if (currentConversationId !== launchPayload.conversationId) return;
+    if (loadingConversationIds.includes(launchPayload.conversationId)) return;
+    autoSendDoneForNonceRef.current = launchPayload.nonce;
+    void handleSendMessage(launchPayload.text);
+  }, [isOpen, launchPayload, currentConversationId, loadingConversationIds]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -410,6 +619,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       handleSendMessage();
     }
   };
+
+  const handleCopyAssistantMessage = useCallback(async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId((prev) => (prev === messageId ? null : prev));
+      }, 1600);
+    } catch (error) {
+      console.error('Copy failed:', error);
+    }
+  }, []);
 
   if (!isOpen) return null;
 
@@ -542,27 +763,112 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`
-                  max-w-[86%] px-4 py-3 rounded-2xl text-sm leading-relaxed
+                  max-w-[90%] min-w-0 overflow-hidden px-4 py-3 rounded-2xl text-sm
                   ${message.role === 'user'
                     ? 'bg-blue-500 text-white rounded-tr-md'
                     : 'bg-gray-100 text-gray-800 rounded-tl-md'
                   }
                 `}>
                   {message.role === 'assistant' ? (
-                    <div className="prose prose-sm max-w-none prose-headings:my-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-code:text-[12px] prose-pre:my-2 prose-pre:bg-gray-900 prose-pre:text-gray-100">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.content}
-                      </ReactMarkdown>
+                    <div className="space-y-3">
+                      <div className="min-w-0 overflow-hidden text-[14px] leading-7 text-gray-800 break-words">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            h1: ({ children }) => <h1 className="mt-2 mb-3 text-[19px] font-bold leading-8 text-gray-900">{children}</h1>,
+                            h2: ({ children }) => <h2 className="mt-2 mb-2 text-[17px] font-semibold leading-7 text-gray-900">{children}</h2>,
+                            h3: ({ children }) => <h3 className="mt-2 mb-2 text-[15px] font-semibold leading-7 text-gray-900">{children}</h3>,
+                            p: ({ children }) => <p className="my-2 leading-7 text-gray-800 break-words">{children}</p>,
+                            ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5 marker:text-gray-500">{children}</ul>,
+                            ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5 marker:text-gray-500">{children}</ol>,
+                            li: ({ children }) => <li className="leading-7">{children}</li>,
+                            blockquote: ({ children }) => (
+                              <blockquote className="my-3 border-l-4 border-gray-300 pl-3 text-gray-700">{children}</blockquote>
+                            ),
+                            table: ({ children }) => (
+                              <div className="my-3 w-full overflow-x-auto rounded-lg border border-gray-200">
+                                <table className="min-w-full border-collapse text-left text-[13px] leading-6">{children}</table>
+                              </div>
+                            ),
+                            thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+                            th: ({ children }) => <th className="border-b border-gray-200 px-3 py-2 font-semibold text-gray-800">{children}</th>,
+                            td: ({ children }) => <td className="border-b border-gray-100 px-3 py-2 align-top text-gray-700">{children}</td>,
+                            a: ({ href, children }) => (
+                              <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 underline decoration-blue-300 underline-offset-2">
+                                {children}
+                              </a>
+                            ),
+                            code: ({ className, children }) => {
+                              const text = String(children ?? '').replace(/\n$/, '');
+                              const isBlock = Boolean(className?.includes('language-'));
+                              if (isBlock) {
+                                return (
+                                  <code className="block whitespace-pre text-[12px] leading-6 text-gray-100">
+                                    {text}
+                                  </code>
+                                );
+                              }
+                              return (
+                                <code className="rounded bg-gray-200 px-1.5 py-0.5 text-[12px] text-gray-800">
+                                  {text}
+                                </code>
+                              );
+                            },
+                            pre: ({ children }) => (
+                              <pre className="my-3 w-full overflow-x-auto rounded-lg bg-gray-900 p-3">
+                                {children}
+                              </pre>
+                            ),
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCopyAssistantMessage(message.id, message.content);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                          title={copiedMessageId === message.id ? '已复制' : '复制全部内容'}
+                        >
+                          {copiedMessageId === message.id ? <Check size={14} /> : <Copy size={14} />}
+                          {copiedMessageId === message.id ? '已复制' : '复制'}
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    <div>
+                      {message.imageDataUrls?.length ? (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {message.imageDataUrls.map((src, idx) => (
+                            <img
+                              key={idx}
+                              src={src}
+                              alt=""
+                              className="max-h-28 max-w-[140px] rounded-lg object-cover border border-white/35"
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                      {message.todoQuote ? (
+                        <div className="mt-2 border-l-2 border-white/60 pl-2 text-[11px] leading-snug text-white/90">
+                          <div className="font-semibold truncate">{message.todoQuote.title}</div>
+                          {message.todoQuote.firstLine ? (
+                            <div className="truncate opacity-90">{message.todoQuote.firstLine}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   )}
                 </div>
               </div>
             ))
           )}
           
-          {isLoading && (
+          {isCurrentConversationLoading && (
             <div className="flex justify-start">
               <div className="bg-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md">
                 <Loader2 size={16} className="animate-spin" />
@@ -575,6 +881,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       </div>
 
       <div className="p-4 border-t border-gray-100 bg-white flex-shrink-0">
+        {pendingImageDataUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {pendingImageDataUrls.map((src, idx) => (
+              <div key={idx} className="relative group">
+                <img
+                  src={src}
+                  alt=""
+                  className="h-16 w-16 rounded-lg object-cover border border-gray-200"
+                />
+                <button
+                  type="button"
+                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] font-bold text-white opacity-90 shadow hover:bg-black"
+                  aria-label="Remove"
+                  onClick={() =>
+                    setPendingImageDataUrls((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="flex gap-2">
           <textarea
             ref={inputTextareaRef}
@@ -586,17 +915,70 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             rows={1}
           />
           <button
-            onClick={handleSendMessage}
-            disabled={!inputText.trim() || isLoading}
+            onClick={() => {
+              void handleSendMessage();
+            }}
+            disabled={
+              (!inputText.trim() && !pendingImageDataUrls.length) || isCurrentConversationLoading
+            }
             className={`
               px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center
-              ${inputText.trim() && !isLoading
+              ${(inputText.trim() || pendingImageDataUrls.length) && !isCurrentConversationLoading
                 ? 'bg-black text-white hover:bg-zinc-800'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }
             `}
           >
-            {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            {isCurrentConversationLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          </button>
+        </div>
+        <div className="mt-2 flex items-center gap-1">
+          <input
+            ref={chatImageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handlePickChatImages}
+          />
+          <button
+            type="button"
+            className={`p-2 rounded-lg transition-colors text-gray-400 hover:text-gray-700 hover:bg-gray-100 ${
+              pendingImageDataUrls.length >= MAX_CHAT_ATTACH_IMAGES ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
+            disabled={pendingImageDataUrls.length >= MAX_CHAT_ATTACH_IMAGES}
+            title={ct.attachImageTooltip}
+            aria-label={ct.attachImageTooltip}
+            onClick={() => chatImageInputRef.current?.click()}
+          >
+            <ImagePlus size={18} />
+          </button>
+          <button
+            type="button"
+            disabled={!canUseRemoteTools}
+            className={`p-2 rounded-lg transition-colors ${
+              !canUseRemoteTools
+                ? 'cursor-not-allowed text-gray-200'
+                : webSearchEnabled
+                  ? 'text-black bg-gray-100'
+                  : 'text-gray-300 hover:bg-gray-50 hover:text-gray-500'
+            }`}
+            title={
+              !canUseRemoteTools
+                ? ct.agentToolsHint
+                : webSearchEnabled
+                  ? ct.webSearchOn
+                  : ct.webSearchOff
+            }
+            aria-pressed={canUseRemoteTools ? webSearchEnabled : undefined}
+            aria-label={
+              !canUseRemoteTools ? ct.agentToolsHint : webSearchEnabled ? ct.webSearchOn : ct.webSearchOff
+            }
+            onClick={() => {
+              if (canUseRemoteTools) setWebSearchEnabled((v) => !v);
+            }}
+          >
+            <Search size={18} strokeWidth={webSearchEnabled && canUseRemoteTools ? 2.25 : 1.65} />
           </button>
         </div>
         {!canUseRemoteTools ? (

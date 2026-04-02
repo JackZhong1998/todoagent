@@ -3,6 +3,10 @@ import type { Message } from "../types";
 
 const MOONSHOT_URL = "https://api.moonshot.cn/v1/chat/completions";
 
+export type KimiUserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export type KimiToolCall = {
   id: string;
   type: "function";
@@ -25,9 +29,26 @@ type KimiToolMessage = {
 
 export type KimiRequestMessage =
   | { role: "system"; content: string }
-  | { role: "user"; content: string }
+  | { role: "user"; content: string | KimiUserContentPart[] }
   | KimiAssistantMessage
   | KimiToolMessage;
+
+/** Builds OpenAI-compatible user `content` for Moonshot / Kimi (incl. vision). */
+export function kimiUserMessageContent(m: Message): string | KimiUserContentPart[] {
+  const text = String(m.apiContent ?? m.content ?? "");
+  const trimmed = text.trim();
+  const imgs =
+    m.imageDataUrls?.filter((u) => typeof u === "string" && u.startsWith("data:image/")) ?? [];
+  if (!imgs.length) {
+    return trimmed.length ? trimmed : " ";
+  }
+  const parts: KimiUserContentPart[] = [];
+  for (const url of imgs) {
+    parts.push({ type: "image_url", image_url: { url } });
+  }
+  parts.push({ type: "text", text: trimmed.length ? trimmed : "（见附图）" });
+  return parts;
+}
 
 /** kimi-k2.5 可关闭思考，避免 tool 多轮必须携带 reasoning_content；thinking 专用模型勿用。 */
 function requestBodyForModel(
@@ -53,10 +74,12 @@ export async function runKimiWithTools(options: {
 }): Promise<string> {
   const { apiKey, model, getSystemContent, history, tools, executeTool, maxToolRounds = 8 } = options;
 
-  const baseMessages: KimiRequestMessage[] = history.map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: m.content,
-  }));
+  const baseMessages: KimiRequestMessage[] = history.map((m) => {
+    if (m.role === "assistant") {
+      return { role: "assistant", content: m.content };
+    }
+    return { role: "user", content: kimiUserMessageContent(m) };
+  });
 
   const messages: KimiRequestMessage[] = [
     { role: "system", content: getSystemContent() },

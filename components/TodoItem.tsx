@@ -1,9 +1,25 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot, Plus } from 'lucide-react';
+import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lucide-react';
 import { htmlToMarkdown } from '../utils/htmlToMarkdown';
+import { applyMarkdownLineTriggers, handleTodoSubtaskEnter, selectionHtmlInsideEditor } from '../utils/todoEditorMarkdown';
+import {
+  fetchTodoInlineCompletion,
+  getCaretClientRect,
+  getPlainTextBeforeCaret,
+  insertPlainTextAtCaret,
+  stripRedundantOverlap,
+} from '../utils/todoInlineComplete';
+import { TODO_INLINE_AI_EVENT, getTodoInlineAiEnabled } from '../utils/todoInlineCompleteSettings';
 import { Todo, Priority } from '../types';
-import { formatDuration, formatFullDateTimeShort, formatDeadlineShort } from '../utils';
+import { formatDuration, formatFullDateTimeShort, formatDeadlineShort, generateId } from '../utils';
+import {
+  TODO_AGENT_CARD_CLASS,
+  TODO_AGENT_STATUS_TEXT_CLASS,
+  setAgentCardLabelsInHtml,
+  syncAgentCardStatesInEditor,
+  wrapSelectionInAgentCard,
+} from '../utils/todoAgentCard';
 import { PriorityBadge } from './PriorityBadge';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -12,7 +28,13 @@ interface TodoItemProps {
   onUpdate: (id: string, updates: Partial<Todo>) => void;
   onDelete: (id: string) => void;
   isHighlighted?: boolean;
-  onOpenChat?: () => void;
+  onOpenChat?: (payload?: {
+    selectedText?: string;
+    forceNewConversation?: boolean;
+    autoSend?: boolean;
+    conversationId?: string;
+    focusConversationId?: string;
+  }) => void;
 }
 
 export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false, onOpenChat }) => {
@@ -24,13 +46,34 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const timerRef = useRef<number | null>(null);
   const controlPanelRef = useRef<HTMLDivElement>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectionAgentAnchor, setSelectionAgentAnchor] = useState<{ top: number; left: number; text: string } | null>(null);
   const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [deadlineTime, setDeadlineTime] = useState<string>('');
-  const [formatMenuOpen, setFormatMenuOpen] = useState(false);
-  const [gutterTop, setGutterTop] = useState<number | null>(null);
-  const formatMenuRef = useRef<HTMLDivElement>(null);
+  const gutterHostRef = useRef<HTMLDivElement>(null);
+  const isComposingRef = useRef(false);
   const initRef = useRef(false);
+
+  const [inlineAiEnabled, setInlineAiEnabled] = useState(() => getTodoInlineAiEnabled());
+  const [inlineGhost, setInlineGhost] = useState<string | null>(null);
+  const [inlineGhostPos, setInlineGhostPos] = useState<{
+    left: number;
+    top: number;
+    maxW: number;
+  } | null>(null);
+  const inlineGhostRef = useRef<string | null>(null);
+  const inlineDebounceRef = useRef<number | null>(null);
+  const inlineAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    inlineGhostRef.current = inlineGhost;
+  }, [inlineGhost]);
+
+  useEffect(() => {
+    const sync = () => setInlineAiEnabled(getTodoInlineAiEnabled());
+    window.addEventListener(TODO_INLINE_AI_EVENT, sync);
+    return () => window.removeEventListener(TODO_INLINE_AI_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (!initRef.current) {
@@ -58,6 +101,26 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
   }, [todo.content, todo.title, todo.id]);
 
+  /** Agent 卡片状态由侧栏回调更新到 todo.content 时，即使编辑器在聚焦也要同步 data-agent-state（不误替换全文） */
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed || !todo.content) return;
+    syncAgentCardStatesInEditor(ed, todo.content);
+  }, [todo.content, todo.id]);
+
+  useEffect(() => {
+    if (!todo.content) return;
+    const next = setAgentCardLabelsInHtml(todo.content, {
+      thinking: te.agentThinking,
+      answered: te.agentAnswered,
+    });
+    if (next !== todo.content) {
+      onUpdate(todo.id, { content: next });
+    } else if (editorRef.current) {
+      syncAgentCardStatesInEditor(editorRef.current, next);
+    }
+  }, [te.agentThinking, te.agentAnswered, todo.id]);
+
   // 点击编辑器外部时关闭图片控制面板
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -76,49 +139,45 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   }, []);
 
   useEffect(() => {
-    if (!formatMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = formatMenuRef.current;
-      if (el && !el.contains(e.target as Node)) setFormatMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [formatMenuOpen]);
-
-  useEffect(() => {
     const ed = editorRef.current;
     if (!ed || !isEditing) {
-      setGutterTop(null);
+      setSelectionAgentAnchor(null);
       return;
     }
-    const updateGutter = () => {
-      if (document.activeElement !== ed) {
-        setGutterTop(null);
+    const updateSelectionAgentAnchor = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        setSelectionAgentAnchor(null);
         return;
       }
-      const sel = window.getSelection();
-      if (!sel?.rangeCount) return;
       const range = sel.getRangeAt(0);
-      let rect = range.getBoundingClientRect();
-      if (rect.height === 0 && range.startContainer.nodeType === Node.TEXT_NODE) {
-        const r2 = document.createRange();
-        const node = range.startContainer;
-        const len = (node.textContent || '').length;
-        const off = Math.min(range.startOffset, len);
-        r2.setStart(node, off);
-        r2.setEnd(node, off);
-        rect = r2.getBoundingClientRect();
+      if (!ed.contains(range.commonAncestorContainer)) {
+        setSelectionAgentAnchor(null);
+        return;
       }
-      const er = ed.getBoundingClientRect();
-      const top = rect.top - er.top + ed.scrollTop;
-      setGutterTop(Number.isFinite(top) ? top : null);
+      const selectedText = sel.toString().replace(/\s+/g, ' ').trim();
+      if (!selectedText) {
+        setSelectionAgentAnchor(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      const host = gutterHostRef.current;
+      const hostRect = host?.getBoundingClientRect();
+      if (!hostRect || !Number.isFinite(rect.top) || !Number.isFinite(rect.right)) {
+        setSelectionAgentAnchor(null);
+        return;
+      }
+      const top = Math.max(8, rect.top - hostRect.top - 30);
+      const left = Math.max(8, rect.right - hostRect.left + 8);
+      setSelectionAgentAnchor({ top, left, text: selectedText });
     };
-    updateGutter();
-    document.addEventListener('selectionchange', updateGutter);
-    ed.addEventListener('scroll', updateGutter, { passive: true });
+    document.addEventListener('selectionchange', updateSelectionAgentAnchor);
+    ed.addEventListener('mouseup', updateSelectionAgentAnchor);
+    ed.addEventListener('keyup', updateSelectionAgentAnchor);
     return () => {
-      document.removeEventListener('selectionchange', updateGutter);
-      ed.removeEventListener('scroll', updateGutter);
+      document.removeEventListener('selectionchange', updateSelectionAgentAnchor);
+      ed.removeEventListener('mouseup', updateSelectionAgentAnchor);
+      ed.removeEventListener('keyup', updateSelectionAgentAnchor);
     };
   }, [isEditing, todo.id]);
 
@@ -168,25 +227,144 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
   }, [todo.id, todo.content, todo.title, onUpdate]);
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const base64 = event.target?.result as string;
-            const imgHtml = `<div class="my-4"><img src="${base64}" class="max-w-[400px] h-auto rounded-xl border border-gray-100 cursor-pointer hover:shadow-lg transition-shadow" alt="image" /></div><p><br></p>`;
-            document.execCommand('insertHTML', false, imgHtml);
-            saveContent();
-          };
-          reader.readAsDataURL(file);
-        }
-        e.preventDefault();
-      }
+  const clearInlineSuggestion = useCallback(() => {
+    if (inlineDebounceRef.current !== null) {
+      window.clearTimeout(inlineDebounceRef.current);
+      inlineDebounceRef.current = null;
     }
-  }, [saveContent]);
+    inlineAbortRef.current?.abort();
+    inlineAbortRef.current = null;
+    setInlineGhost(null);
+    setInlineGhostPos(null);
+  }, []);
+
+  const repositionInlineGhost = useCallback(() => {
+    if (!inlineGhostRef.current) return;
+    const ed = editorRef.current;
+    const host = gutterHostRef.current;
+    if (!ed || !host) return;
+    const rect = getCaretClientRect(ed);
+    if (!rect) {
+      setInlineGhostPos(null);
+      return;
+    }
+    const hostRect = host.getBoundingClientRect();
+    setInlineGhostPos({
+      left: rect.left - hostRect.left,
+      top: rect.top - hostRect.top,
+      maxW: Math.max(60, hostRect.width - (rect.left - hostRect.left) - 12),
+    });
+  }, []);
+
+  const scheduleInlineComplete = useCallback(() => {
+    if (!inlineAiEnabled) return;
+    const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+    if (!apiKey) return;
+
+    if (inlineDebounceRef.current !== null) {
+      window.clearTimeout(inlineDebounceRef.current);
+    }
+    inlineDebounceRef.current = window.setTimeout(() => {
+      inlineDebounceRef.current = null;
+      const ed = editorRef.current;
+      if (!ed || document.activeElement !== ed || isComposingRef.current) return;
+
+      const prefix = getPlainTextBeforeCaret(ed);
+      if (prefix === null || prefix.trim().length < 1) return;
+
+      inlineAbortRef.current?.abort();
+      const ac = new AbortController();
+      inlineAbortRef.current = ac;
+      const sentPrefix = prefix;
+
+      void (async () => {
+        try {
+          const raw = await fetchTodoInlineCompletion(sentPrefix, { apiKey, signal: ac.signal });
+          const merged = stripRedundantOverlap(sentPrefix, raw);
+          if (!merged) return;
+          const ed2 = editorRef.current;
+          if (!ed2 || document.activeElement !== ed2 || isComposingRef.current) return;
+          const nowPrefix = getPlainTextBeforeCaret(ed2);
+          if (nowPrefix !== sentPrefix) return;
+          setInlineGhost(merged);
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+        }
+      })();
+    }, 480);
+  }, [inlineAiEnabled]);
+
+  useEffect(() => {
+    if (!inlineAiEnabled) {
+      clearInlineSuggestion();
+    }
+  }, [inlineAiEnabled, clearInlineSuggestion]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const onSel = () => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      if (!sel.anchorNode || !ed.contains(sel.anchorNode)) return;
+      if (!sel.isCollapsed) {
+        clearInlineSuggestion();
+        return;
+      }
+      if (inlineGhostRef.current) {
+        requestAnimationFrame(() => repositionInlineGhost());
+      }
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, [isEditing, clearInlineSuggestion, repositionInlineGhost]);
+
+  useEffect(() => {
+    if (!inlineGhost) {
+      setInlineGhostPos(null);
+      return;
+    }
+    const update = () => repositionInlineGhost();
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [inlineGhost, repositionInlineGhost]);
+
+  const insertImageFromFile = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        const imgHtml = `<div class="my-4"><img src="${base64}" class="max-w-[400px] h-auto rounded-xl border border-gray-100 cursor-pointer hover:shadow-lg transition-shadow" alt="image" /></div><p><br></p>`;
+        document.execCommand('insertHTML', false, imgHtml);
+        saveContent();
+      };
+      reader.readAsDataURL(file);
+    },
+    [saveContent]
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            insertImageFromFile(file);
+          }
+          e.preventDefault();
+        }
+      }
+    },
+    [insertImageFromFile]
+  );
 
   const toggleComplete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -201,41 +379,76 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     onUpdate(todo.id, { priority: nextPriority });
   };
 
-  const applyFormat = useCallback(
-    (action: () => void) => {
-      if (!editorRef.current) return;
-      editorRef.current.focus();
-      action();
-      setFormatMenuOpen(false);
-      saveContent();
-    },
-    [saveContent]
-  );
-
-  const handleCopy = useCallback(
-    (e: React.ClipboardEvent<HTMLDivElement>) => {
-      if (!editorRef.current) return;
-      const md = htmlToMarkdown(editorRef.current.innerHTML);
+  const handleCopy = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const partial = selectionHtmlInsideEditor(ed);
+    if (partial !== null) {
+      const md = htmlToMarkdown(partial);
       e.clipboardData.setData('text/plain', md);
-      e.clipboardData.setData('text/html', editorRef.current.innerHTML);
+      e.clipboardData.setData('text/html', partial);
       e.preventDefault();
-    },
-    []
-  );
+      return;
+    }
+    const md = htmlToMarkdown(ed.innerHTML);
+    e.clipboardData.setData('text/plain', md);
+    e.clipboardData.setData('text/html', ed.innerHTML);
+    e.preventDefault();
+  }, []);
+
+  const handleCut = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !ed.contains(sel.anchorNode)) return;
+
+    const partial = selectionHtmlInsideEditor(ed);
+    if (partial === null) return;
+
+    const md = htmlToMarkdown(partial);
+    e.clipboardData.setData('text/plain', md);
+    e.clipboardData.setData('text/html', partial);
+    e.preventDefault();
+    sel.deleteFromDocument();
+    saveContent();
+  }, [saveContent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && inlineGhostRef.current) {
+      e.preventDefault();
+      clearInlineSuggestion();
+      return;
+    }
+    if (e.key === 'Tab' && !e.shiftKey && inlineGhostRef.current) {
+      e.preventDefault();
+      const text = inlineGhostRef.current;
+      const ed = editorRef.current;
+      if (ed && insertPlainTextAtCaret(text)) {
+        clearInlineSuggestion();
+        applyMarkdownLineTriggers(ed);
+        saveContent();
+      }
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
       document.execCommand('bold');
       return;
     }
+    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
+      const ed = editorRef.current;
+      if (ed && handleTodoSubtaskEnter(ed)) {
+        e.preventDefault();
+        saveContent();
+        return;
+      }
+    }
     if (e.key === 'Enter') {
       const selection = window.getSelection();
       const anchorNode = selection?.anchorNode;
       const h1 = anchorNode?.nodeName === 'H1' ? anchorNode : anchorNode?.parentElement?.closest('h1');
-      
+
       if (h1) {
-        // 让浏览器处理换行，然后强制转换为普通段落
         setTimeout(() => {
           document.execCommand('formatBlock', false, 'div');
         }, 0);
@@ -243,62 +456,51 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
   };
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const selection = window.getSelection();
-    if (!selection || !selection.focusNode) return;
-    
-    const node = selection.focusNode;
-    const text = node.textContent || '';
-    
-    if (text.endsWith('\u00A0') || text.endsWith(' ')) {
-      const trimmedText = text.trim();
-      
-      if (trimmedText === '#') {
-        // H1
-        node.textContent = '';
-        document.execCommand('formatBlock', false, 'H1');
-        const selection = window.getSelection();
-        const focusNode = selection?.focusNode;
-        const h1 = (focusNode?.nodeName === 'H1' ? focusNode : focusNode?.parentElement?.closest('h1')) as HTMLElement;
-        if (h1) {
-          h1.className = 'text-3xl font-bold text-black mt-6 mb-4 leading-tight';
-        }
-      } else if (trimmedText === '##') {
-        // H2
-        node.textContent = '';
-        document.execCommand('formatBlock', false, 'H2');
-        const selection = window.getSelection();
-        const focusNode = selection?.focusNode;
-        const h2 = (focusNode?.nodeName === 'H2' ? focusNode : focusNode?.parentElement?.closest('h2')) as HTMLElement;
-        if (h2) {
-          h2.className = 'text-2xl font-semibold text-gray-500 mt-5 mb-3 leading-snug';
-        }
-      } else if (trimmedText === '-' || trimmedText === '*') {
-        node.textContent = '';
-        document.execCommand('insertUnorderedList');
-      } else if (/^\d+\.$/.test(trimmedText)) {
-        node.textContent = '';
-        document.execCommand('insertOrderedList');
-      } else if (trimmedText === '[]') {
-        node.textContent = '';
-        const todoHtml =
-          '<p class="flex items-start gap-2 my-1"><span class="todo-md-check select-none text-gray-500 font-mono text-sm" contenteditable="false">[ ]</span><span>\u00A0</span></p>';
-        document.execCommand('insertHTML', false, todoHtml);
-      } else if (trimmedText === '```') {
-        node.textContent = '';
-        const pre = document.createElement('pre');
-        const code = document.createElement('code');
-        code.innerHTML = '<br>';
-        pre.appendChild(code);
-        pre.className = 'bg-gray-50 text-gray-800 p-4 rounded-lg my-3 font-mono text-sm border border-gray-100 overflow-x-auto block';
-        document.execCommand('insertHTML', false, pre.outerHTML);
-      }
-    }
+  const handleInput = () => {
+    const ed = editorRef.current;
+    if (!ed || isComposingRef.current) return;
+    clearInlineSuggestion();
+    applyMarkdownLineTriggers(ed);
     saveContent();
+    scheduleInlineComplete();
   };
 
-  const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false;
+    const ed = editorRef.current;
+    if (!ed) return;
+    clearInlineSuggestion();
+    applyMarkdownLineTriggers(ed);
+    saveContent();
+    scheduleInlineComplete();
+  };
+
+  const handleEditorClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
+    const agentDot =
+      (target.closest(`.${TODO_AGENT_STATUS_TEXT_CLASS}`) as HTMLElement | null) ||
+      (target.closest(`.${TODO_AGENT_CARD_CLASS}`) as HTMLElement | null);
+    if (agentDot && onOpenChat) {
+      e.preventDefault();
+      e.stopPropagation();
+      const cid = agentDot.getAttribute('data-conversation-id');
+      if (cid) {
+        onOpenChat({ focusConversationId: cid });
+      }
+      return;
+    }
+    const todoCheck = target.closest('.todo-md-check') as HTMLElement | null;
+    if (todoCheck) {
+      e.preventDefault();
+      e.stopPropagation();
+      const nextChecked = todoCheck.dataset.todoChecked === '1' ? '0' : '1';
+      todoCheck.dataset.todoChecked = nextChecked;
+      todoCheck.textContent = nextChecked === '1' ? '✓' : '';
+      const line = todoCheck.closest('p');
+      if (line) line.classList.toggle('todo-md-done', nextChecked === '1');
+      saveContent();
+      return;
+    }
     if (target.tagName === 'IMG') {
       setSelectedImage(target as HTMLImageElement);
     }
@@ -342,10 +544,10 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       `}
     >
       {/* Combined Controls and Editor */}
-      <div className="flex items-start gap-4 select-none mb-2 relative">
+      <div className="flex items-start gap-4 mb-2 relative">
         <button 
           onClick={toggleComplete}
-          className="mt-1 text-gray-300 hover:text-blue-500 transition-colors flex-shrink-0"
+          className="mt-1 text-gray-300 hover:text-blue-500 transition-colors flex-shrink-0 select-none"
         >
           {todo.isCompleted ? (
             <CheckCircle className="w-6 h-6 text-blue-500 fill-blue-50" />
@@ -354,50 +556,42 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           )}
         </button>
 
-        <div className="flex-1 min-w-0 relative pl-7">
-          {isEditing && gutterTop !== null ? (
+        <div ref={gutterHostRef} className="flex-1 min-w-0 relative">
+          {isEditing && selectionAgentAnchor && onOpenChat ? (
             <button
               type="button"
-              className="absolute left-0 z-20 w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-800 shadow-sm"
-              style={{ top: gutterTop, transform: 'translateY(1px)' }}
-              title={te.insertFormat}
-              aria-label={te.insertFormat}
+              className="absolute z-50 w-8 h-8 rounded-full border border-blue-200 bg-white text-blue-600 shadow-sm hover:bg-blue-50 transition-colors flex items-center justify-center"
+              style={{ top: selectionAgentAnchor.top, left: selectionAgentAnchor.left }}
+              title={te.askAgentFromSelection}
+              aria-label={te.askAgentFromSelection}
               onMouseDown={(e) => {
                 e.preventDefault();
-                setFormatMenuOpen((v) => !v);
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const ed = editorRef.current;
+                const cid = generateId();
+                let wrapped = false;
+                if (ed) {
+                  wrapped = wrapSelectionInAgentCard(ed, cid, {
+                    thinking: te.agentThinking,
+                    answered: te.agentAnswered,
+                  });
+                  if (wrapped) saveContent();
+                }
+                onOpenChat({
+                  selectedText: selectionAgentAnchor.text,
+                  forceNewConversation: true,
+                  autoSend: true,
+                  conversationId: cid,
+                });
+                setSelectionAgentAnchor(null);
               }}
             >
-              <Plus size={14} strokeWidth={2.5} />
+              <Bot size={16} strokeWidth={1.8} />
             </button>
-          ) : null}
-          {formatMenuOpen && gutterTop !== null ? (
-            <div
-              ref={formatMenuRef}
-              className="absolute left-0 z-30 w-56 rounded-xl border border-gray-100 bg-white shadow-xl py-1.5 text-left"
-              style={{ top: gutterTop + 30 }}
-            >
-              <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{te.insertFormat}</div>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H1'))}>{te.h1}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H2'))}>{te.h2}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('formatBlock', false, 'H3'))}>{te.h3}</button>
-              <div className="h-px bg-gray-100 my-1 mx-2" />
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertUnorderedList'))}>{te.bullet}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertOrderedList'))}>{te.ordered}</button>
-              <div className="h-px bg-gray-100 my-1 mx-2" />
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('bold'))}>{te.bold}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('strikeThrough'))}>{te.strike}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => document.execCommand('insertHTML', false, '<p class="flex items-start gap-2 my-1"><span class="todo-md-check select-none text-gray-500 font-mono text-sm" contenteditable="false">[ ]</span><span>\u00A0</span></p>'))}>{te.todoLine}</button>
-              <div className="h-px bg-gray-100 my-1 mx-2" />
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-500" onMouseDown={(e) => e.preventDefault()} onClick={() => { setFormatMenuOpen(false); editorRef.current?.focus(); }}>{te.image}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(() => {
-                const pre = document.createElement('pre');
-                const code = document.createElement('code');
-                code.innerHTML = '<br>';
-                pre.appendChild(code);
-                pre.className = 'bg-gray-50 text-gray-800 p-4 rounded-lg my-3 font-mono text-sm border border-gray-100 overflow-x-auto block';
-                document.execCommand('insertHTML', false, pre.outerHTML);
-              })}>{te.codeBlock}</button>
-            </div>
           ) : null}
           <div className="absolute top-0 right-0 flex items-center gap-3 z-10 bg-white/50 backdrop-blur-sm pl-2 rounded-bl-lg">
             <PriorityBadge 
@@ -416,18 +610,26 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             ref={editorRef}
             contentEditable
             onInput={handleInput}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+              clearInlineSuggestion();
+            }}
+            onCompositionEnd={handleCompositionEnd}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCopy={handleCopy}
-            onClick={handleImageClick}
+            onCut={handleCut}
+            onClick={handleEditorClick}
             onFocus={() => setIsEditing(true)}
             onBlur={() => {
               setIsEditing(false);
-              setFormatMenuOpen(false);
+              setSelectionAgentAnchor(null);
+              clearInlineSuggestion();
               saveContent();
             }}
             className={`
-              w-full outline-none text-[15px] leading-7 font-normal text-[#37352f] pr-36
+              w-full outline-none text-[15px] leading-7 font-normal text-[#37352f] select-text
+              [&>h1:first-child]:pr-28
               
               [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-black [&_h1]:mt-0 [&_h1]:mb-4 [&_h1]:leading-tight
               [&_h1:empty]:before:content-['新任务'] [&_h1:empty]:before:text-gray-200
@@ -435,6 +637,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
               [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-gray-500 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:leading-snug
             [&_h2:empty]:before:content-['二级标题'] [&_h2:empty]:before:text-gray-200
             [&_h3]:text-lg [&_h3]:font-medium [&_h3]:text-gray-600 [&_h3]:mt-4 [&_h3]:mb-2
+            [&_hr]:block [&_hr]:w-full [&_hr]:my-6 [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-gray-200
             
             [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ul]:marker:text-blue-500
             [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_ol]:marker:text-blue-500 [&_ol]:marker:font-medium
@@ -450,11 +653,52 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             [&_img]:block [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-2 [&_img]:shadow-sm [&_img]:transition-all
             [&_img]:cursor-pointer [&_img]:hover:shadow-md [&_img]:border [&_img]:border-transparent [&_img]:hover:border-blue-200
             [&_.float-left]:float-left [&_.float-left]:mr-6 [&_.float-left]:mb-2
-            [&_.todo-md-check]:shrink-0
+            [&_.todo-md-check]:shrink-0 [&_.todo-md-check]:w-5 [&_.todo-md-check]:h-5 [&_.todo-md-check]:mt-1
+            [&_.todo-md-check]:inline-flex [&_.todo-md-check]:items-center [&_.todo-md-check]:justify-center
+            [&_.todo-md-check]:rounded-full [&_.todo-md-check]:border [&_.todo-md-check]:border-gray-300
+            [&_.todo-md-check]:text-[11px] [&_.todo-md-check]:leading-none [&_.todo-md-check]:font-semibold
+            [&_.todo-md-check]:text-transparent [&_.todo-md-check]:cursor-pointer [&_.todo-md-check]:select-none
+            [&_.todo-md-check[data-todo-checked='1']]:bg-blue-500 [&_.todo-md-check[data-todo-checked='1']]:border-blue-500
+            [&_.todo-md-check[data-todo-checked='1']]:text-white
+            [&_.todo-md-done_.todo-md-content]:text-gray-400 [&_.todo-md-done_.todo-md-content]:line-through
+
+            [&_.todo-agent-line]:inline
+            [&_.todo-agent-line-text]:inline
+            [&_.todo-agent-status-text]:shrink-0 [&_.todo-agent-status-text]:inline-flex [&_.todo-agent-status-text]:items-center [&_.todo-agent-status-text]:justify-center
+            [&_.todo-agent-status-text]:h-6 [&_.todo-agent-status-text]:px-2 [&_.todo-agent-status-text]:ml-2 [&_.todo-agent-status-text]:rounded-md [&_.todo-agent-status-text]:cursor-pointer
+            [&_.todo-agent-status-text]:select-none [&_.todo-agent-status-text]:text-[12px] [&_.todo-agent-status-text]:leading-none [&_.todo-agent-status-text]:font-medium
+            [&_.todo-agent-status-text]:transition-colors [&_.todo-agent-status-text]:border [&_.todo-agent-status-text]:whitespace-nowrap [&_.todo-agent-status-text]:align-middle
+            [&_.todo-agent-status-text[data-agent-state='loading']]:border-red-200 [&_.todo-agent-status-text[data-agent-state='loading']]:bg-red-50 [&_.todo-agent-status-text[data-agent-state='loading']]:text-red-700
+            [&_.todo-agent-status-text[data-agent-state='loading']]:animate-pulse
+            [&_.todo-agent-status-text[data-agent-state='answered']]:border-emerald-200 [&_.todo-agent-status-text[data-agent-state='answered']]:bg-emerald-50 [&_.todo-agent-status-text[data-agent-state='answered']]:text-emerald-700
+            [&_.todo-agent-card]:my-1 [&_.todo-agent-card]:relative [&_.todo-agent-card]:min-w-0 [&_.todo-agent-card]:rounded-none [&_.todo-agent-card]:border-0
+            [&_.todo-agent-card]:bg-transparent [&_.todo-agent-card]:p-0 [&_.todo-agent-card]:pr-4 [&_.todo-agent-card]:shadow-none
+            [&_.todo-agent-card]:before:hidden [&_.todo-agent-card]:pl-0
+            [&_.todo-agent-card[data-agent-state='loading']]:after:absolute [&_.todo-agent-card[data-agent-state='loading']]:after:right-0 [&_.todo-agent-card[data-agent-state='loading']]:after:top-1.5
+            [&_.todo-agent-card[data-agent-state='loading']]:after:h-5 [&_.todo-agent-card[data-agent-state='loading']]:after:w-5 [&_.todo-agent-card[data-agent-state='loading']]:after:rounded-full
+            [&_.todo-agent-card[data-agent-state='loading']]:after:bg-red-500 [&_.todo-agent-card[data-agent-state='loading']]:after:ring-1 [&_.todo-agent-card[data-agent-state='loading']]:after:ring-black/10
+            [&_.todo-agent-card[data-agent-state='loading']]:after:content-[''] [&_.todo-agent-card[data-agent-state='loading']]:animate-pulse
+            [&_.todo-agent-card[data-agent-state='answered']]:after:absolute [&_.todo-agent-card[data-agent-state='answered']]:after:right-0 [&_.todo-agent-card[data-agent-state='answered']]:after:top-1.5
+            [&_.todo-agent-card[data-agent-state='answered']]:after:h-5 [&_.todo-agent-card[data-agent-state='answered']]:after:w-5 [&_.todo-agent-card[data-agent-state='answered']]:after:rounded-full
+            [&_.todo-agent-card[data-agent-state='answered']]:after:bg-emerald-500 [&_.todo-agent-card[data-agent-state='answered']]:after:ring-1 [&_.todo-agent-card[data-agent-state='answered']]:after:ring-black/10
+            [&_.todo-agent-card[data-agent-state='answered']]:after:content-['']
           `}
           data-placeholder="新任务"
           spellCheck={false}
         />
+
+        {inlineGhost && inlineGhostPos ? (
+          <div
+            className="pointer-events-none absolute z-20 max-w-full whitespace-pre-wrap break-words text-[15px] leading-7 font-normal text-gray-400/90"
+            style={{
+              left: inlineGhostPos.left,
+              top: inlineGhostPos.top,
+              maxWidth: inlineGhostPos.maxW,
+            }}
+          >
+            {inlineGhost}
+          </div>
+        ) : null}
         
         {/* Image Control Panel */}
         {selectedImage && (
@@ -503,7 +747,10 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         {/* Bottom Left - AI Chat */}
         {onOpenChat && (
           <button
-            onClick={(e) => { e.stopPropagation(); onOpenChat(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChat({ forceNewConversation: true });
+            }}
             className="w-10 h-10 flex items-center justify-center rounded-full border border-stone-200/90 bg-white text-stone-500 transition-colors duration-200 hover:border-stone-300 hover:bg-stone-50 hover:text-stone-800"
             title={t.app.aiAssistant}
           >
