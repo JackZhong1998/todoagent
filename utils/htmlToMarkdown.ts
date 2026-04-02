@@ -47,6 +47,10 @@ function walk(node: Node, lines: string[], listDepth: number): void {
       el.childNodes.forEach((c) => walk(c, lines, listDepth));
       lines.push('\n\n');
       return;
+    case 'hr':
+      blockEnd();
+      lines.push('---\n\n');
+      return;
     case 'div':
       el.childNodes.forEach((c) => walk(c, lines, listDepth));
       return;
@@ -132,13 +136,14 @@ function walk(node: Node, lines: string[], listDepth: number): void {
     }
     case 'input': {
       if (el.getAttribute('type') === 'checkbox') {
-        lines.push(el.checked ? '[x] ' : '[ ] ');
+        const input = el as HTMLInputElement;
+        lines.push(input.checked ? '[x] ' : '[ ] ');
       }
       return;
     }
     case 'span':
       if (el.classList.contains('todo-md-check') || el.dataset.todoCheck === '1') {
-        lines.push('[ ] ');
+        lines.push(el.dataset.todoChecked === '1' ? '[x] ' : '[ ] ');
         return;
       }
       el.childNodes.forEach((c) => walk(c, lines, listDepth));

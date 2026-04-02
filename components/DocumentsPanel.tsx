@@ -41,9 +41,11 @@ async function fileToDoc(file: File): Promise<WorkspaceDoc> {
 
 export interface DocumentsPanelProps {
   projectId: string;
+  /** Show only user uploads vs only Skill-imported docs. */
+  listScope: 'user' | 'skill';
 }
 
-export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => {
+export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listScope }) => {
   const { t } = useLanguage();
   const bumpRemoteSync = useWorkspaceSyncBump();
   const d = t.docs;
@@ -71,20 +73,26 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
     return () => window.removeEventListener(PROJECT_DOCS_UPDATED_EVENT, onExternalDocs);
   }, [projectId]);
 
+  const visibleDocs = useMemo(
+    () =>
+      listScope === 'skill' ? docs.filter((x) => x.isSkill) : docs.filter((x) => !x.isSkill),
+    [docs, listScope]
+  );
+
+  const selected = useMemo(
+    () => (selectedId ? visibleDocs.find((x) => x.id === selectedId) : undefined),
+    [visibleDocs, selectedId]
+  );
+
   useEffect(() => {
-    if (docs.length === 0) {
+    if (visibleDocs.length === 0) {
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !docs.some((x) => x.id === selectedId)) {
-      setSelectedId(docs[0].id);
+    if (!selectedId || !visibleDocs.some((x) => x.id === selectedId)) {
+      setSelectedId(visibleDocs[0].id);
     }
-  }, [docs, selectedId]);
-
-  const selected = useMemo(
-    () => (selectedId ? docs.find((x) => x.id === selectedId) : undefined),
-    [docs, selectedId]
-  );
+  }, [visibleDocs, selectedId]);
 
   const onFiles = useCallback(
     async (files: FileList | null) => {
@@ -119,31 +127,35 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
   return (
     <div className="flex h-[min(70vh,640px)] border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
       <div className="w-[min(100%,280px)] flex-shrink-0 min-h-0 border-r border-gray-100 flex flex-col bg-gray-50/80">
-        <div className="p-3 border-b border-gray-100 space-y-2 shrink-0">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".md,.markdown,.txt,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            multiple
-            className="hidden"
-            onChange={(e) => void onFiles(e.target.files)}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-black text-white text-sm font-semibold hover:bg-zinc-800 transition-colors"
-          >
-            <Upload size={18} />
-            {d.upload}
-          </button>
-          {uploadError ? <p className="text-xs text-rose-600 px-1">{uploadError}</p> : null}
-          <p className="text-[11px] text-gray-400 leading-snug px-1">{d.hint}</p>
-        </div>
+        {listScope === 'user' ? (
+          <div className="p-3 border-b border-gray-100 space-y-2 shrink-0">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,.markdown,.txt,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              multiple
+              className="hidden"
+              onChange={(e) => void onFiles(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-black text-white text-sm font-semibold hover:bg-zinc-800 transition-colors"
+            >
+              <Upload size={18} />
+              {d.upload}
+            </button>
+            {uploadError ? <p className="text-xs text-rose-600 px-1">{uploadError}</p> : null}
+            <p className="text-[11px] text-gray-400 leading-snug px-1">{d.hint}</p>
+          </div>
+        ) : null}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-1">
-          {docs.length === 0 ? (
-            <div className="py-12 px-3 text-center text-sm text-gray-400">{d.emptyList}</div>
+          {visibleDocs.length === 0 ? (
+            <div className="py-12 px-3 text-center text-sm text-gray-400">
+              {listScope === 'skill' ? d.emptySkillList : d.emptyList}
+            </div>
           ) : (
-            docs.map((doc) => (
+            visibleDocs.map((doc) => (
               <div
                 key={doc.id}
                 className={`group flex items-stretch gap-1 rounded-xl border transition-colors ${
@@ -158,14 +170,7 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
                   className="flex-1 min-w-0 text-left px-3 py-2.5 flex items-start gap-2"
                 >
                   <FileText size={16} className="text-gray-400 shrink-0 mt-0.5" />
-                  <span className="text-sm font-medium text-gray-800 truncate min-w-0 flex items-center gap-1.5">
-                    <span className="truncate">{doc.name}</span>
-                    {doc.isSkill ? (
-                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-md">
-                        {d.skillBadge}
-                      </span>
-                    ) : null}
-                  </span>
+                  <span className="text-sm font-medium text-gray-800 truncate min-w-0">{doc.name}</span>
                 </button>
                 <button
                   type="button"

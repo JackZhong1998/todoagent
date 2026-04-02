@@ -24,6 +24,13 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Actual prompt sent to model; falls back to `content` for old records. */
+  apiContent?: string;
+  /** Visual quote shown under user bubble for Todo-context asks. */
+  todoQuote?: {
+    title: string;
+    firstLine: string;
+  };
   timestamp: number;
 }
 

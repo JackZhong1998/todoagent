@@ -37,6 +37,8 @@ interface AIAnalysisPageProps {
   onBack?: () => void;
   /** Hide top bar with back button (e.g. when shown inside app tab). */
   embedded?: boolean;
+  /** Renders left of sub-tabs in the embedded sticky header (e.g. sidebar toggle). */
+  embeddedHeaderLeading?: React.ReactNode;
   /** Incremental SOP Markdown (stats tab, second sub-tab). */
   sopMarkdown?: string;
   sopLoading?: boolean;
@@ -111,12 +113,17 @@ function ProseBlock({
   );
 }
 
+/** Matches AppShell `APP_MAIN_STICKY_BAR` — keep in sync for visual continuity. */
+const embeddedStickyBarClass =
+  'sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-2 bg-[#fcfcfc]/95 backdrop-blur-md border-b border-gray-100/90';
+
 export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
   todos,
   analysisByTodoId,
   analysisLoadingByTodoId,
   onBack,
   embedded = false,
+  embeddedHeaderLeading,
   sopMarkdown = '',
   sopLoading = false,
 }) => {
@@ -305,27 +312,30 @@ export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
     <div className="space-y-6">
       {embedded ? (
         <div className="space-y-3">
-          <div className="flex p-1 bg-gray-100/80 rounded-xl w-full max-w-md">
-            <button
-              type="button"
-              onClick={() => setStatsSubTab('replaceability')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                statsSubTab === 'replaceability'
-                  ? 'bg-white text-black shadow-sm'
-                  : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {a.tabReplaceability}
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatsSubTab('sop')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                statsSubTab === 'sop' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {a.tabSop}
-            </button>
+          <div className={`${embeddedStickyBarClass} flex items-center gap-3 flex-wrap`}>
+            {embeddedHeaderLeading}
+            <div className="flex p-1 bg-gray-100/80 rounded-xl flex-1 min-w-[min(100%,280px)] max-w-lg">
+              <button
+                type="button"
+                onClick={() => setStatsSubTab('replaceability')}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  statsSubTab === 'replaceability'
+                    ? 'bg-white text-black shadow-sm'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                {a.tabReplaceability}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsSubTab('sop')}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  statsSubTab === 'sop' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                {a.tabSop}
+              </button>
+            </div>
           </div>
           {statsSubTab === 'replaceability' ? (
             <p className="text-xs text-gray-400 leading-relaxed bg-white border border-gray-100 rounded-2xl px-5 py-4">

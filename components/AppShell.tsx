@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, FileText } from 'lucide-react';
 import { Todo, Priority, FilterType } from '../types';
 import { generateId, stripHtmlTags } from '../utils';
+import { setAgentCardStateInHtml } from '../utils/todoAgentCard';
 import {
   ensureProjectsWithMigration,
   loadProjectAnalysis,
@@ -45,6 +46,9 @@ function tabFromPathname(pathname: string): AppTab {
   if (pathname.startsWith('/app/docs')) return 'docs';
   return 'todo';
 }
+
+const APP_MAIN_STICKY_BAR =
+  'sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-2 bg-[#fcfcfc]/95 backdrop-blur-md border-b border-gray-100/90';
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
 
@@ -124,10 +128,19 @@ const AppShell: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>(() => loadProjectTodos(initialManifest.activeProjectId));
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const [docsListScope, setDocsListScope] = useState<'user' | 'skill'>('user');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(420);
   const [isResizingChat, setIsResizingChat] = useState(false);
   const [currentTodoForChat, setCurrentTodoForChat] = useState<Todo | undefined>(undefined);
+  const [chatLaunchPayload, setChatLaunchPayload] = useState<{
+    nonce: number;
+    text?: string;
+    autoSend?: boolean;
+    forceNewConversation?: boolean;
+    conversationId?: string;
+    focusConversationId?: string;
+  } | null>(null);
   const [analysisByTodoId, setAnalysisByTodoId] = useState<Record<string, AnalysisResultItem>>(() =>
     loadProjectAnalysis(initialManifest.activeProjectId)
   );
@@ -407,18 +420,81 @@ const AppShell: React.FC = () => {
 
   const openGlobalChat = () => {
     setCurrentTodoForChat(undefined);
+    setChatLaunchPayload(null);
     setIsChatOpen(true);
   };
 
-  const openTodoChat = (todo: Todo) => {
+  const handleTodoAgentCardResolved = useCallback((todoId: string, conversationId: string) => {
+    setTodos((prev) =>
+      prev.map((t) => {
+        if (t.id !== todoId) return t;
+        const nextHtml = setAgentCardStateInHtml(t.content, conversationId, 'answered');
+        if (nextHtml === t.content) return t;
+        return { ...t, content: nextHtml };
+      })
+    );
+  }, []);
+
+  const handleTodoAgentCardStatusChange = useCallback(
+    (todoId: string, conversationId: string, state: 'loading' | 'answered') => {
+      setTodos((prev) =>
+        prev.map((t) => {
+          if (t.id !== todoId) return t;
+          const nextHtml = setAgentCardStateInHtml(t.content, conversationId, state);
+          if (nextHtml === t.content) return t;
+          return { ...t, content: nextHtml };
+        })
+      );
+    },
+    []
+  );
+
+  const openTodoChat = (
+    todo: Todo,
+    payload?: {
+      selectedText?: string;
+      forceNewConversation?: boolean;
+      autoSend?: boolean;
+      conversationId?: string;
+      focusConversationId?: string;
+    }
+  ) => {
     setCurrentTodoForChat(todo);
+    if (payload?.focusConversationId) {
+      setChatLaunchPayload({
+        nonce: Date.now(),
+        focusConversationId: payload.focusConversationId,
+      });
+    } else if (
+      payload?.selectedText != null ||
+      payload?.autoSend ||
+      payload?.forceNewConversation ||
+      payload?.conversationId
+    ) {
+      setChatLaunchPayload({
+        nonce: Date.now(),
+        text: payload.selectedText,
+        autoSend: payload.autoSend,
+        forceNewConversation: payload.forceNewConversation,
+        conversationId: payload.conversationId,
+      });
+    } else {
+      setChatLaunchPayload(null);
+    }
     setIsChatOpen(true);
   };
 
   const closeChat = () => {
     setIsChatOpen(false);
     setCurrentTodoForChat(undefined);
+    setChatLaunchPayload(null);
   };
+
+  /** 与列表中的 Todo 同步，避免正文（如 Agent 卡片状态）更新后侧栏仍用旧 content */
+  const currentTodoForChatLive = useMemo(() => {
+    if (!currentTodoForChat) return undefined;
+    return todos.find((t) => t.id === currentTodoForChat.id) ?? currentTodoForChat;
+  }, [todos, currentTodoForChat]);
 
   const filteredAndSortedTodos = useMemo(() => {
     let list = [...todos];
@@ -500,12 +576,12 @@ const AppShell: React.FC = () => {
       </aside>
 
       <div className="flex-1 h-screen overflow-hidden flex flex-col min-w-0">
-        <div className="app-main-scroll flex-1 overflow-y-auto py-6 px-4 md:px-8">
+        <div className="app-main-scroll flex-1 overflow-y-auto pt-0 pb-6 px-4 md:px-8">
           <div className="max-w-[1000px] mx-auto w-full">
             <main className="space-y-10">
               {activeTab === 'todo' && (
                 <>
-                  <div className="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-2 bg-[#fcfcfc]/95 backdrop-blur-md border-b border-gray-100/90 flex items-center justify-between gap-3 flex-wrap">
+                  <div className={`${APP_MAIN_STICKY_BAR} flex items-center justify-between gap-3 flex-wrap`}>
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
                       {navToggle}
                       <div className="flex items-center gap-2 bg-gray-100/50 p-1.5 rounded-full w-fit">
@@ -548,7 +624,7 @@ const AppShell: React.FC = () => {
                             todo={todo}
                             onUpdate={updateTodo}
                             onDelete={deleteTodo}
-                            onOpenChat={() => openTodoChat(todo)}
+                            onOpenChat={(payload) => openTodoChat(todo, payload)}
                           />
                         </div>
                       ))
@@ -565,23 +641,51 @@ const AppShell: React.FC = () => {
               )}
 
               {activeTab === 'stats' && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2">{navToggle}</div>
-                  <AIAnalysisPage
-                    embedded
-                    todos={todos}
-                    analysisByTodoId={analysisByTodoId}
-                    analysisLoadingByTodoId={analysisLoadingByTodoId}
-                    sopMarkdown={sopMarkdown}
-                    sopLoading={sopLoading}
-                  />
-                </div>
+                <AIAnalysisPage
+                  embedded
+                  embeddedHeaderLeading={navToggle}
+                  todos={todos}
+                  analysisByTodoId={analysisByTodoId}
+                  analysisLoadingByTodoId={analysisLoadingByTodoId}
+                  sopMarkdown={sopMarkdown}
+                  sopLoading={sopLoading}
+                />
               )}
 
               {activeTab === 'docs' && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2">{navToggle}</div>
-                  <DocumentsPanel key={activeProjectId} projectId={activeProjectId} />
+                <div className="space-y-4">
+                  <div className={`${APP_MAIN_STICKY_BAR} flex items-center gap-3 flex-wrap`}>
+                    {navToggle}
+                    <div className="flex p-1 bg-gray-100/80 rounded-xl flex-1 min-w-[min(100%,260px)] max-w-lg">
+                      <button
+                        type="button"
+                        onClick={() => setDocsListScope('user')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                          docsListScope === 'user'
+                            ? 'bg-white text-black shadow-sm'
+                            : 'text-gray-500 hover:text-gray-800'
+                        }`}
+                      >
+                        {t.docs.tabUserDocs}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDocsListScope('skill')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                          docsListScope === 'skill'
+                            ? 'bg-white text-black shadow-sm'
+                            : 'text-gray-500 hover:text-gray-800'
+                        }`}
+                      >
+                        {t.docs.tabSkillDocs}
+                      </button>
+                    </div>
+                  </div>
+                  <DocumentsPanel
+                    key={activeProjectId}
+                    projectId={activeProjectId}
+                    listScope={docsListScope}
+                  />
                 </div>
               )}
             </main>
@@ -604,8 +708,11 @@ const AppShell: React.FC = () => {
         isOpen={isChatOpen}
         width={chatWidth}
         onClose={closeChat}
-        initialTodo={currentTodoForChat}
+        initialTodo={currentTodoForChatLive}
+        launchPayload={chatLaunchPayload}
         onNewGlobalChat={openGlobalChat}
+        onTodoAgentCardResolved={handleTodoAgentCardResolved}
+        onTodoAgentCardStatusChange={handleTodoAgentCardStatusChange}
       />
 
       <UserSettings />
