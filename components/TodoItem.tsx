@@ -3,6 +3,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lucide-react';
 import { htmlToMarkdown } from '../utils/htmlToMarkdown';
 import { applyMarkdownLineTriggers, handleTodoSubtaskEnter, selectionHtmlInsideEditor } from '../utils/todoEditorMarkdown';
+import {
+  fetchTodoInlineCompletion,
+  getCaretClientRect,
+  getPlainTextBeforeCaret,
+  insertPlainTextAtCaret,
+  stripRedundantOverlap,
+} from '../utils/todoInlineComplete';
+import { TODO_INLINE_AI_EVENT, getTodoInlineAiEnabled } from '../utils/todoInlineCompleteSettings';
 import { Todo, Priority } from '../types';
 import { formatDuration, formatFullDateTimeShort, formatDeadlineShort, generateId } from '../utils';
 import {
@@ -45,6 +53,27 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const gutterHostRef = useRef<HTMLDivElement>(null);
   const isComposingRef = useRef(false);
   const initRef = useRef(false);
+
+  const [inlineAiEnabled, setInlineAiEnabled] = useState(() => getTodoInlineAiEnabled());
+  const [inlineGhost, setInlineGhost] = useState<string | null>(null);
+  const [inlineGhostPos, setInlineGhostPos] = useState<{
+    left: number;
+    top: number;
+    maxW: number;
+  } | null>(null);
+  const inlineGhostRef = useRef<string | null>(null);
+  const inlineDebounceRef = useRef<number | null>(null);
+  const inlineAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    inlineGhostRef.current = inlineGhost;
+  }, [inlineGhost]);
+
+  useEffect(() => {
+    const sync = () => setInlineAiEnabled(getTodoInlineAiEnabled());
+    window.addEventListener(TODO_INLINE_AI_EVENT, sync);
+    return () => window.removeEventListener(TODO_INLINE_AI_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (!initRef.current) {
@@ -198,6 +227,114 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
   }, [todo.id, todo.content, todo.title, onUpdate]);
 
+  const clearInlineSuggestion = useCallback(() => {
+    if (inlineDebounceRef.current !== null) {
+      window.clearTimeout(inlineDebounceRef.current);
+      inlineDebounceRef.current = null;
+    }
+    inlineAbortRef.current?.abort();
+    inlineAbortRef.current = null;
+    setInlineGhost(null);
+    setInlineGhostPos(null);
+  }, []);
+
+  const repositionInlineGhost = useCallback(() => {
+    if (!inlineGhostRef.current) return;
+    const ed = editorRef.current;
+    const host = gutterHostRef.current;
+    if (!ed || !host) return;
+    const rect = getCaretClientRect(ed);
+    if (!rect) {
+      setInlineGhostPos(null);
+      return;
+    }
+    const hostRect = host.getBoundingClientRect();
+    setInlineGhostPos({
+      left: rect.left - hostRect.left,
+      top: rect.top - hostRect.top,
+      maxW: Math.max(60, hostRect.width - (rect.left - hostRect.left) - 12),
+    });
+  }, []);
+
+  const scheduleInlineComplete = useCallback(() => {
+    if (!inlineAiEnabled) return;
+    const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+    if (!apiKey) return;
+
+    if (inlineDebounceRef.current !== null) {
+      window.clearTimeout(inlineDebounceRef.current);
+    }
+    inlineDebounceRef.current = window.setTimeout(() => {
+      inlineDebounceRef.current = null;
+      const ed = editorRef.current;
+      if (!ed || document.activeElement !== ed || isComposingRef.current) return;
+
+      const prefix = getPlainTextBeforeCaret(ed);
+      if (prefix === null || prefix.trim().length < 1) return;
+
+      inlineAbortRef.current?.abort();
+      const ac = new AbortController();
+      inlineAbortRef.current = ac;
+      const sentPrefix = prefix;
+
+      void (async () => {
+        try {
+          const raw = await fetchTodoInlineCompletion(sentPrefix, { apiKey, signal: ac.signal });
+          const merged = stripRedundantOverlap(sentPrefix, raw);
+          if (!merged) return;
+          const ed2 = editorRef.current;
+          if (!ed2 || document.activeElement !== ed2 || isComposingRef.current) return;
+          const nowPrefix = getPlainTextBeforeCaret(ed2);
+          if (nowPrefix !== sentPrefix) return;
+          setInlineGhost(merged);
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+        }
+      })();
+    }, 480);
+  }, [inlineAiEnabled]);
+
+  useEffect(() => {
+    if (!inlineAiEnabled) {
+      clearInlineSuggestion();
+    }
+  }, [inlineAiEnabled, clearInlineSuggestion]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const onSel = () => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      if (!sel.anchorNode || !ed.contains(sel.anchorNode)) return;
+      if (!sel.isCollapsed) {
+        clearInlineSuggestion();
+        return;
+      }
+      if (inlineGhostRef.current) {
+        requestAnimationFrame(() => repositionInlineGhost());
+      }
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, [isEditing, clearInlineSuggestion, repositionInlineGhost]);
+
+  useEffect(() => {
+    if (!inlineGhost) {
+      setInlineGhostPos(null);
+      return;
+    }
+    const update = () => repositionInlineGhost();
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [inlineGhost, repositionInlineGhost]);
+
   const insertImageFromFile = useCallback(
     (file: File) => {
       if (!file.type.startsWith('image/')) return;
@@ -277,6 +414,22 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   }, [saveContent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && inlineGhostRef.current) {
+      e.preventDefault();
+      clearInlineSuggestion();
+      return;
+    }
+    if (e.key === 'Tab' && !e.shiftKey && inlineGhostRef.current) {
+      e.preventDefault();
+      const text = inlineGhostRef.current;
+      const ed = editorRef.current;
+      if (ed && insertPlainTextAtCaret(text)) {
+        clearInlineSuggestion();
+        applyMarkdownLineTriggers(ed);
+        saveContent();
+      }
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
       document.execCommand('bold');
@@ -306,16 +459,20 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
   const handleInput = () => {
     const ed = editorRef.current;
     if (!ed || isComposingRef.current) return;
+    clearInlineSuggestion();
     applyMarkdownLineTriggers(ed);
     saveContent();
+    scheduleInlineComplete();
   };
 
   const handleCompositionEnd = () => {
     isComposingRef.current = false;
     const ed = editorRef.current;
     if (!ed) return;
+    clearInlineSuggestion();
     applyMarkdownLineTriggers(ed);
     saveContent();
+    scheduleInlineComplete();
   };
 
   const handleEditorClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -455,6 +612,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             onInput={handleInput}
             onCompositionStart={() => {
               isComposingRef.current = true;
+              clearInlineSuggestion();
             }}
             onCompositionEnd={handleCompositionEnd}
             onKeyDown={handleKeyDown}
@@ -466,6 +624,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             onBlur={() => {
               setIsEditing(false);
               setSelectionAgentAnchor(null);
+              clearInlineSuggestion();
               saveContent();
             }}
             className={`
@@ -527,6 +686,19 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           data-placeholder="新任务"
           spellCheck={false}
         />
+
+        {inlineGhost && inlineGhostPos ? (
+          <div
+            className="pointer-events-none absolute z-20 max-w-full whitespace-pre-wrap break-words text-[15px] leading-7 font-normal text-gray-400/90"
+            style={{
+              left: inlineGhostPos.left,
+              top: inlineGhostPos.top,
+              maxWidth: inlineGhostPos.maxW,
+            }}
+          >
+            {inlineGhost}
+          </div>
+        ) : null}
         
         {/* Image Control Panel */}
         {selectedImage && (

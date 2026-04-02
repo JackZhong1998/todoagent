@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
-import { User, Globe, LogOut, ChevronRight, Home, BookOpenText, Shield, FileText } from 'lucide-react';
+import { User, Globe, LogOut, ChevronRight, Home, BookOpenText, Shield, FileText, Sparkles } from 'lucide-react';
+import { getTodoInlineAiEnabled, setTodoInlineAiEnabled } from '../utils/todoInlineCompleteSettings';
 import { useUser } from '@clerk/clerk-react';
 
 const settingsTranslations = {
@@ -15,6 +16,8 @@ const settingsTranslations = {
     goPrivacy: 'Back to Privacy Policy',
     goTerms: 'Back to Terms',
     quickLinks: 'Quick Links',
+    aiInlineComplete: 'AI inline completion in tasks',
+    aiInlineCompleteShort: 'Ghost suggestions while typing; Tab to accept.',
   },
   zh: {
     switchLanguage: '切换语言',
@@ -25,6 +28,8 @@ const settingsTranslations = {
       goPrivacy: '返回隐私协议',
       goTerms: '返回用户协议',
       quickLinks: '快捷入口',
+    aiInlineComplete: '任务正文 AI 续写',
+    aiInlineCompleteShort: '输入时显示灰色续写提示，Tab 采纳。',
   },
 };
 
@@ -34,8 +39,13 @@ export const UserSettings: React.FC = () => {
   const { user } = useUser();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
+  const [inlineAiOn, setInlineAiOn] = useState(() => getTodoInlineAiEnabled());
   const rootRef = useRef<HTMLDivElement>(null);
   const t = settingsTranslations[language];
+
+  useEffect(() => {
+    if (isOpen) setInlineAiOn(getTodoInlineAiEnabled());
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -153,6 +163,39 @@ export const UserSettings: React.FC = () => {
                 <span className="text-sm font-medium text-gray-700">{t.goTerms}</span>
               </div>
               <ChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
+
+            <div className="h-px bg-gray-100 my-2" />
+
+            <button
+              type="button"
+              aria-pressed={inlineAiOn}
+              onClick={() => {
+                const next = !inlineAiOn;
+                setInlineAiOn(next);
+                setTodoInlineAiEnabled(next);
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center space-x-3 min-w-0">
+                <Sparkles className="w-5 h-5 text-gray-600 shrink-0" />
+                <div className="text-left min-w-0">
+                  <div className="text-sm font-medium text-gray-700">{t.aiInlineComplete}</div>
+                  <div className="text-[11px] text-gray-500 leading-snug">{t.aiInlineCompleteShort}</div>
+                </div>
+              </div>
+              <span
+                className={`shrink-0 ml-2 w-9 h-5 rounded-full relative transition-colors ${
+                  inlineAiOn ? 'bg-emerald-500' : 'bg-gray-200'
+                }`}
+                aria-hidden
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                    inlineAiOn ? 'left-4' : 'left-0.5'
+                  }`}
+                />
+              </span>
             </button>
 
             <div className="h-px bg-gray-100 my-2" />
