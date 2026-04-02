@@ -32,6 +32,8 @@ export interface Conversation {
   title: string;
   messages: Message[];
   todoId?: string;
+  /** Skill docs (WorkspaceDoc.id) whose full body is injected into this chat's system prompt. */
+  attachedSkillDocIds?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -44,4 +46,8 @@ export interface WorkspaceDoc {
   kind: WorkspaceDocKind;
   body: string;
   createdAt: number;
+  /** When set, document was imported from this URL (e.g. GitHub raw). */
+  sourceUrl?: string;
+  /** Skill instructions: shown in docs list and injectable into chat. */
+  isSkill?: boolean;
 }

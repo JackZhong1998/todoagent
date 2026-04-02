@@ -5,7 +5,11 @@ import mammoth from 'mammoth';
 import { FileText, Trash2, Upload } from 'lucide-react';
 import type { WorkspaceDoc } from '../types';
 import { generateId } from '../utils';
-import { loadProjectDocs, saveProjectDocs } from '../utils/projectStorage';
+import {
+  loadProjectDocs,
+  PROJECT_DOCS_UPDATED_EVENT,
+  saveProjectDocs,
+} from '../utils/projectStorage';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useWorkspaceSyncBump } from '../contexts/WorkspaceSyncContext';
 
@@ -49,9 +53,23 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    setDocs(loadProjectDocs(projectId));
+  }, [projectId]);
+
+  useEffect(() => {
     saveProjectDocs(projectId, docs);
     bumpRemoteSync();
   }, [docs, projectId, bumpRemoteSync]);
+
+  useEffect(() => {
+    const onExternalDocs = (e: Event) => {
+      const pid = (e as CustomEvent<{ projectId: string }>).detail?.projectId;
+      if (pid !== projectId) return;
+      setDocs(loadProjectDocs(projectId));
+    };
+    window.addEventListener(PROJECT_DOCS_UPDATED_EVENT, onExternalDocs);
+    return () => window.removeEventListener(PROJECT_DOCS_UPDATED_EVENT, onExternalDocs);
+  }, [projectId]);
 
   useEffect(() => {
     if (docs.length === 0) {
@@ -140,7 +158,14 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId }) => 
                   className="flex-1 min-w-0 text-left px-3 py-2.5 flex items-start gap-2"
                 >
                   <FileText size={16} className="text-gray-400 shrink-0 mt-0.5" />
-                  <span className="text-sm font-medium text-gray-800 truncate">{doc.name}</span>
+                  <span className="text-sm font-medium text-gray-800 truncate min-w-0 flex items-center gap-1.5">
+                    <span className="truncate">{doc.name}</span>
+                    {doc.isSkill ? (
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-md">
+                        {d.skillBadge}
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
                 <button
                   type="button"

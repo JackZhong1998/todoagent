@@ -1,15 +1,31 @@
 
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { WorkspaceDoc } from '../types';
 import { Conversation, Message, Todo } from '../types';
 import { translations } from '../i18n/locales';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useWorkspaceSyncBump } from '../contexts/WorkspaceSyncContext';
-import { generateId, stripHtmlTags, SYSTEM_PROMPT } from '../utils';
-import { loadProjectConversations, saveProjectConversations } from '../utils/projectStorage';
+import {
+  generateId,
+  skillDocumentNameFromUrl,
+  stripHtmlTags,
+  SYSTEM_PROMPT,
+} from '../utils';
+import { AGENT_TOOLS_SYSTEM_PROMPT, KIMI_AGENT_TOOLS } from '../utils/kimiToolDefinitions';
+import { runKimiWithTools } from '../utils/kimiToolChat';
+import { createClerkSupabaseClient, isSupabaseConfigured } from '../utils/supabase/client';
+import {
+  loadProjectConversations,
+  loadProjectDocs,
+  notifyProjectDocsUpdated,
+  saveProjectConversations,
+  saveProjectDocs,
+} from '../utils/projectStorage';
 
 function isDefaultChatTitle(title: string): boolean {
   return (
@@ -31,6 +47,49 @@ interface ChatPanelProps {
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
 
+const MAX_SKILL_INJECT_CHARS = 80_000;
+const MOONSHOT_MODEL = import.meta.env.VITE_MOONSHOT_MODEL || 'kimi-k2.5';
+
+function formatWebSearchToolPayload(data: unknown, invokeError: { message: string } | null): string {
+  if (invokeError) {
+    return JSON.stringify({ ok: false, error: invokeError.message });
+  }
+  if (data == null || typeof data !== 'object') {
+    return JSON.stringify({
+      ok: false,
+      error: 'agent-tools 返回为空或非对象',
+    });
+  }
+  const p = data as { ok?: boolean; error?: string; results?: unknown };
+  if (p.ok === false) {
+    return JSON.stringify(p);
+  }
+  const results = Array.isArray(p.results) ? p.results : [];
+  return JSON.stringify({
+    ok: true,
+    search_completed: true,
+    items: results.length,
+    results,
+    reply_instruction:
+      '这是真实检索结果。若 items>0：用中文归纳要点并列出标题与链接。若 items=0：说明未找到匹配网页。不要声称搜索功能故障。',
+  });
+}
+
+function buildSkillInjectionBlock(projectId: string, skillDocIds: string[]): string {
+  if (!skillDocIds.length) return '';
+  const docs = loadProjectDocs(projectId);
+  const skillDocs = skillDocIds
+    .map((id) => docs.find((d) => d.id === id))
+    .filter((d): d is WorkspaceDoc => !!d);
+  if (!skillDocs.length) return '';
+  const text = skillDocs.map((s) => `### Skill: ${s.name}\n${s.body}`).join('\n\n---\n\n');
+  const trimmed =
+    text.length > MAX_SKILL_INJECT_CHARS
+      ? `${text.slice(0, MAX_SKILL_INJECT_CHARS)}\n\n[Skill 内容已截断]`
+      : text;
+  return `\n\n## 本对话已挂载的 Skill（须遵守）\n${trimmed}`;
+}
+
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   projectId,
   isOpen,
@@ -40,6 +99,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onNewGlobalChat,
 }) => {
   const { t, language } = useLanguage();
+  const { isLoggedIn, getClerkToken } = useAuth();
   const bumpRemoteSync = useWorkspaceSyncBump();
   const ct = t.chat;
   const dateLocale = language === 'zh' ? 'zh-CN' : 'en-US';
@@ -48,10 +108,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   );
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const el = inputTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const linePx = 22;
+    const maxInner = linePx * 3;
+    el.style.height = `${Math.min(el.scrollHeight, maxInner + 24)}px`;
+  }, [inputText]);
   const [showHistory, setShowHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  /** Tracks skill ids for the in-flight request (updates synchronously on import_skill). */
+  const skillAttachRef = useRef<string[]>([]);
   const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+
+  const supabase = useMemo(() => {
+    if (!isSupabaseConfigured() || !isLoggedIn) return null;
+    return createClerkSupabaseClient(getClerkToken);
+  }, [isLoggedIn, getClerkToken]);
+
+  const canUseRemoteTools = !!supabase;
 
   const currentConversation = useMemo(() => {
     return currentConversationId 
@@ -140,27 +219,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }));
   };
 
-  const callKimiAPI = async (messages: Message[]): Promise<string> => {
+  const buildSystemPrompt = useCallback(
+    (includeToolInstructions: boolean, skillDocIds: string[]) => {
+      let s = `${KIMI_SYSTEM_PROMPT}\n\n${SYSTEM_PROMPT}`;
+      if (includeToolInstructions) s += `\n\n${AGENT_TOOLS_SYSTEM_PROMPT}`;
+      s += buildSkillInjectionBlock(projectId, skillDocIds);
+      return s;
+    },
+    [projectId]
+  );
+
+  const callKimiAPIPlain = async (messages: Message[], skillDocIds: string[]): Promise<string> => {
     if (!apiKey) {
       throw new Error(ct.missingApiKey);
     }
 
     const apiMessages = [
-      { role: 'system', content: KIMI_SYSTEM_PROMPT + '\n\n' + SYSTEM_PROMPT },
-      ...messages.map(m => ({ role: m.role, content: m.content }))
+      { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds) },
+      ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ];
 
     const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'kimi-k2.5',
+        model: MOONSHOT_MODEL,
         messages: apiMessages,
-        temperature: 1
-      })
+        temperature: 1,
+      }),
     });
 
     if (!response.ok) {
@@ -182,23 +271,125 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       timestamp: Date.now()
     };
 
-    addMessageToConversation(currentConversationId, userMessage);
+    const convId = currentConversationId;
+    const convBefore = conversations.find((c) => c.id === convId);
+    skillAttachRef.current = [...(convBefore?.attachedSkillDocIds ?? [])];
+
+    addMessageToConversation(convId, userMessage);
     setInputText('');
     setIsLoading(true);
 
+    if (!apiKey) {
+      setIsLoading(false);
+      const err: Message = {
+        id: generateId(),
+        role: 'assistant',
+        content: ct.missingApiKey,
+        timestamp: Date.now(),
+      };
+      addMessageToConversation(convId, err);
+      return;
+    }
+
+    const messagesForApi = [...(convBefore?.messages ?? []), userMessage];
+
     try {
-      const conv = conversations.find(c => c.id === currentConversationId);
-      const allMessages = [...(conv?.messages || []), userMessage];
-      const response = await callKimiAPI(allMessages);
-      
+      let response: string;
+
+      if (canUseRemoteTools && supabase) {
+        const client = supabase;
+        const executeTool = async (name: string, argsJson: string): Promise<string> => {
+          let args: Record<string, unknown>;
+          try {
+            args = JSON.parse(argsJson || '{}') as Record<string, unknown>;
+          } catch {
+            return JSON.stringify({ error: 'Invalid JSON arguments' });
+          }
+
+          if (name === 'web_search') {
+            const query = String(args.query ?? '');
+            const { data, error } = await client.functions.invoke('agent-tools', {
+              body: { action: 'web_search', query },
+            });
+            return formatWebSearchToolPayload(data, error);
+          }
+
+          if (name === 'fetch_url') {
+            const url = String(args.url ?? '');
+            const { data, error } = await client.functions.invoke('agent-tools', {
+              body: { action: 'fetch_url', url },
+            });
+            if (error) return JSON.stringify({ error: error.message });
+            const payload = data as { ok?: boolean; error?: string; markdown?: string };
+            if (payload && payload.ok === false) return JSON.stringify(payload);
+            return JSON.stringify(data);
+          }
+
+          if (name === 'import_skill_from_url') {
+            const url = String(args.url ?? '');
+            const { data, error } = await client.functions.invoke('agent-tools', {
+              body: { action: 'fetch_url', url },
+            });
+            if (error) return JSON.stringify({ error: error.message });
+            const payload = data as { ok?: boolean; error?: string; markdown?: string };
+            if (payload && payload.ok === false) return JSON.stringify(payload);
+            const body = String(payload.markdown ?? '');
+            if (!body.trim()) return JSON.stringify({ error: 'Empty document body' });
+
+            const doc: WorkspaceDoc = {
+              id: generateId(),
+              name: skillDocumentNameFromUrl(url),
+              kind: 'markdown',
+              body,
+              createdAt: Date.now(),
+              sourceUrl: url,
+              isSkill: true,
+            };
+            const existing = loadProjectDocs(projectId);
+            saveProjectDocs(projectId, [doc, ...existing]);
+            notifyProjectDocsUpdated(projectId);
+            bumpRemoteSync();
+
+            skillAttachRef.current = [...skillAttachRef.current, doc.id];
+            setConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== convId) return c;
+                const nextIds = [...(c.attachedSkillDocIds ?? []), doc.id];
+                return { ...c, attachedSkillDocIds: nextIds, updatedAt: Date.now() };
+              })
+            );
+
+            return JSON.stringify({
+              ok: true,
+              docId: doc.id,
+              name: doc.name,
+              message: 'Skill 已保存到项目文档，并已挂载到本对话。',
+            });
+          }
+
+          return JSON.stringify({ error: `Unknown tool: ${name}` });
+        };
+
+        response = await runKimiWithTools({
+          apiKey,
+          model: MOONSHOT_MODEL,
+          getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current),
+          history: messagesForApi,
+          tools: [...KIMI_AGENT_TOOLS],
+          executeTool,
+        });
+      } else {
+        response = await callKimiAPIPlain(messagesForApi, skillAttachRef.current);
+      }
+
       const assistantMessage: Message = {
         id: generateId(),
         role: 'assistant',
         content: response,
         timestamp: Date.now()
       };
-      
-      addMessageToConversation(currentConversationId, assistantMessage);
+
+      addMessageToConversation(convId, assistantMessage);
     } catch (error) {
       console.error('Error getting response:', error);
       const errorMessage: Message = {
@@ -207,7 +398,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         content: `${ct.errorPrefix}${error instanceof Error ? error.message : ct.errorUnknown}`,
         timestamp: Date.now()
       };
-      addMessageToConversation(currentConversationId, errorMessage);
+      addMessageToConversation(convId, errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -386,11 +577,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       <div className="p-4 border-t border-gray-100 bg-white flex-shrink-0">
         <div className="flex gap-2">
           <textarea
+            ref={inputTextareaRef}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={ct.inputPlaceholder}
-            className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 resize-none max-h-32"
+            className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm leading-[22px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 resize-none overflow-y-auto min-h-[46px] max-h-[90px]"
             rows={1}
           />
           <button
@@ -407,6 +599,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
+        {!canUseRemoteTools ? (
+          <p className="text-[11px] text-amber-800/90 mt-2 leading-snug">{ct.agentToolsHint}</p>
+        ) : null}
       </div>
     </div>
   );

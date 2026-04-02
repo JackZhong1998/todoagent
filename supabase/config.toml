@@ -1,0 +1,7 @@
+# https://supabase.com/docs/guides/cli/config
+#
+# Clerk「supabase」模板 JWT 不是 Supabase 旧版自签 JWT，网关层 verify_jwt=true 常会直接 401。
+# 鉴权改在函数内用 supabase.auth.getUser()（与前端 createClerkSupabaseClient 一致）。
+
+[functions.agent-tools]
+verify_jwt = false

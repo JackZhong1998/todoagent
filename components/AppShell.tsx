@@ -1,18 +1,21 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, FileText } from 'lucide-react';
 import { Todo, Priority, FilterType } from '../types';
 import { generateId, stripHtmlTags } from '../utils';
 import {
   ensureProjectsWithMigration,
   loadProjectAnalysis,
+  loadProjectSop,
   loadProjectTodos,
   saveManifest,
   saveProjectAnalysis,
+  saveProjectSop,
   saveProjectTodos,
   seedEmptyWorkspace,
   type ProjectMeta,
 } from '../utils/projectStorage';
+import { SOP_INCREMENTAL_SYSTEM_PROMPT, buildSopIncrementalUserPrompt } from '../utils/sopIncremental';
 import {
   TASK_REPLACEABILITY_SYSTEM_PROMPT,
   buildSingleTaskReplaceabilityUserPrompt,
@@ -31,8 +34,16 @@ import { usePageSeo } from '../utils/pageSeo';
 
 type AppTab = 'todo' | 'stats' | 'docs';
 
-interface AppShellProps {
-  initialPage?: 'todo' | 'analysis';
+function appPathFromTab(tab: AppTab): string {
+  if (tab === 'stats') return '/app/stats';
+  if (tab === 'docs') return '/app/docs';
+  return '/app/todo';
+}
+
+function tabFromPathname(pathname: string): AppTab {
+  if (pathname.startsWith('/app/stats')) return 'stats';
+  if (pathname.startsWith('/app/docs')) return 'docs';
+  return 'todo';
 }
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
@@ -85,12 +96,14 @@ const parseSingleAnalysis = (raw: string): AnalysisResultItem | null => {
   }
 };
 
-const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
+const AppShell: React.FC = () => {
   const { t } = useLanguage();
   const location = useLocation();
-  const isAnalysisPath = location.pathname === '/app/analysis';
-  const appSeo = isAnalysisPath ? t.seo.appAnalysis : t.seo.appWorkspace;
-  const appPath = isAnalysisPath ? '/app/analysis' : '/app';
+  const navigate = useNavigate();
+  const activeTab = tabFromPathname(location.pathname);
+  const appSeo =
+    activeTab === 'stats' ? t.seo.appStats : activeTab === 'docs' ? t.seo.appDocs : t.seo.appWorkspace;
+  const appPath = location.pathname.startsWith('/app') ? location.pathname : '/app/todo';
   usePageSeo({
     title: appSeo.title,
     description: appSeo.description,
@@ -111,7 +124,6 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
   const [todos, setTodos] = useState<Todo[]>(() => loadProjectTodos(initialManifest.activeProjectId));
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<AppTab>(() => (initialPage === 'analysis' ? 'stats' : 'todo'));
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(420);
   const [isResizingChat, setIsResizingChat] = useState(false);
@@ -121,7 +133,12 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
   );
   const [analysisLoadingByTodoId, setAnalysisLoadingByTodoId] = useState<Record<string, boolean>>({});
   const [analysisRetryCountByTodoId, setAnalysisRetryCountByTodoId] = useState<Record<string, number>>({});
+  const [sopMarkdown, setSopMarkdown] = useState(() => loadProjectSop(initialManifest.activeProjectId));
+  const [sopLoading, setSopLoading] = useState(false);
   const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+  const sopTailRef = useRef(Promise.resolve());
 
   const { bumpRemotePush } = useWorkspaceSupabaseSync({
     projects,
@@ -132,6 +149,8 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     setActiveProjectId,
     setTodos,
     setAnalysisByTodoId,
+    sopMarkdown,
+    setSopMarkdown,
   });
 
   useEffect(() => {
@@ -142,6 +161,10 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     saveProjectAnalysis(activeProjectId, analysisByTodoId);
   }, [analysisByTodoId, activeProjectId]);
 
+  useEffect(() => {
+    saveProjectSop(activeProjectId, sopMarkdown);
+  }, [sopMarkdown, activeProjectId]);
+
   const selectProject = (id: string) => {
     if (id === activeProjectId) return;
     saveProjectTodos(activeProjectId, todos);
@@ -149,6 +172,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     setActiveProjectId(id);
     setTodos(loadProjectTodos(id));
     setAnalysisByTodoId(loadProjectAnalysis(id));
+    setSopMarkdown(loadProjectSop(id));
     setAnalysisLoadingByTodoId({});
     setAnalysisRetryCountByTodoId({});
     saveManifest({ projects, activeProjectId: id });
@@ -168,6 +192,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     setActiveProjectId(id);
     setTodos([]);
     setAnalysisByTodoId({});
+    setSopMarkdown('');
     setAnalysisLoadingByTodoId({});
     setAnalysisRetryCountByTodoId({});
   };
@@ -302,8 +327,66 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     }
   };
 
+  const scheduleSopUpdate = useCallback(
+    (projectId: string, todo: Todo) => {
+      if (!apiKey) return;
+      sopTailRef.current = sopTailRef.current.then(async () => {
+        setSopLoading(true);
+        try {
+          const prev = loadProjectSop(projectId);
+          const userPrompt = buildSopIncrementalUserPrompt(prev, {
+            title: todo.title || t.app.noTitle,
+            contentPlain: stripHtmlTags(todo.content || ''),
+            priority: todo.priority,
+            totalTimeSeconds: todo.totalTime,
+          });
+          const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'kimi-k2.5',
+              temperature: 0.5,
+              messages: [
+                {
+                  role: 'system',
+                  content: `${KIMI_SYSTEM_PROMPT}\n\n${SOP_INCREMENTAL_SYSTEM_PROMPT}`,
+                },
+                { role: 'user', content: userPrompt },
+              ],
+            }),
+          });
+          if (!response.ok) {
+            let detail = '';
+            try {
+              const err = await response.json();
+              detail = err?.error?.message || '';
+            } catch {
+              detail = await response.text();
+            }
+            throw new Error(`HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
+          }
+          const data = await response.json();
+          const raw = String(data?.choices?.[0]?.message?.content ?? '').trim();
+          if (raw) {
+            saveProjectSop(projectId, raw);
+            if (projectId === activeProjectIdRef.current) setSopMarkdown(raw);
+          }
+        } catch (e) {
+          console.error('[SOP incremental]', e);
+        } finally {
+          setSopLoading(false);
+        }
+      });
+    },
+    [apiKey, t.app.noTitle]
+  );
+
   const updateTodo = (id: string, updates: Partial<Todo>) => {
     let completedTodoForAnalysis: Todo | null = null;
+    const projectId = activeProjectId;
     setTodos(prev => prev.map(t => {
       if (t.id !== id) return t;
       const next = { ...t, ...updates };
@@ -314,6 +397,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
     }));
     if (completedTodoForAnalysis) {
       void analyzeSingleCompletedTodo(completedTodoForAnalysis);
+      scheduleSopUpdate(projectId, completedTodoForAnalysis);
     }
   };
 
@@ -400,7 +484,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
               <button
                 key={id}
                 type="button"
-                onClick={() => setActiveTab(id)}
+                onClick={() => navigate(appPathFromTab(id))}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-colors text-left ${
                   activeTab === id
                     ? 'bg-white text-black shadow-sm border border-gray-100'
@@ -421,7 +505,7 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
             <main className="space-y-10">
               {activeTab === 'todo' && (
                 <>
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-2 bg-[#fcfcfc]/95 backdrop-blur-md border-b border-gray-100/90 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
                       {navToggle}
                       <div className="flex items-center gap-2 bg-gray-100/50 p-1.5 rounded-full w-fit">
@@ -488,6 +572,8 @@ const AppShell: React.FC<AppShellProps> = ({ initialPage = 'todo' }) => {
                     todos={todos}
                     analysisByTodoId={analysisByTodoId}
                     analysisLoadingByTodoId={analysisLoadingByTodoId}
+                    sopMarkdown={sopMarkdown}
+                    sopLoading={sopLoading}
                   />
                 </div>
               )}
