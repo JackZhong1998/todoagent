@@ -95,6 +95,16 @@ export const translations = {
       webSearchOff: 'Web search off',
       attachImageTooltip: 'Attach image',
       userBubbleImageLabel: '[Image]',
+      proxyAuthRequired: 'Please sign in to use the AI assistant.',
+      quotaExceededInChat: 'You have used all free Agent turns for today. Subscribe for unlimited access.',
+    },
+    billing: {
+      paywallTitle: 'Free Agent limit reached',
+      paywallBody:
+        'Non-subscribers get 10 Agent conversations per day (UTC). Subscribe to continue without limits.',
+      upgrade: 'Subscribe with Stripe',
+      maybeLater: 'Not now',
+      checkoutError: 'Could not start checkout. Try again later.',
     },
     analysis: {
       entryTooltip: 'Task replaceability stats',
@@ -392,6 +402,15 @@ export const translations = {
       webSearchOff: '未开启联网搜索（省流量；需要时再点亮）',
       attachImageTooltip: '上传图片',
       userBubbleImageLabel: '[图片]',
+      proxyAuthRequired: '请先登录后再使用 AI 助手。',
+      quotaExceededInChat: '今日免费 Agent 次数已用完。订阅后可继续使用。',
+    },
+    billing: {
+      paywallTitle: '今日免费 Agent 次数已用完',
+      paywallBody: '未订阅用户每个自然日（UTC）可免费使用 10 次 Agent 对话。订阅后可不限次数使用。',
+      upgrade: '使用 Stripe 订阅',
+      maybeLater: '稍后再说',
+      checkoutError: '无法打开支付页，请稍后重试。',
     },
     analysis: {
       entryTooltip: '任务可替代性统计',

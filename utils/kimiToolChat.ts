@@ -1,5 +1,6 @@
 import type { KimiAgentToolDefinition } from "./kimiToolDefinitions";
 import type { Message } from "../types";
+import { AgentQuotaExceededError } from "./moonshotClient";
 
 const MOONSHOT_URL = "https://api.moonshot.cn/v1/chat/completions";
 
@@ -63,7 +64,10 @@ function requestBodyForModel(
 }
 
 export async function runKimiWithTools(options: {
-  apiKey: string;
+  /** 直连 Moonshot（仅本地/未启用代理时） */
+  apiKey?: string;
+  /** 服务端代理：每轮传入完整 OpenAI-compatible body */
+  moonshotCompletions?: (body: Record<string, unknown>) => Promise<Response>;
   model: string;
   /** Refreshed each API round so mid-turn changes (e.g. imported skills) apply to the next model call. */
   getSystemContent: () => string;
@@ -72,7 +76,16 @@ export async function runKimiWithTools(options: {
   maxToolRounds?: number;
   executeTool: (name: string, argsJson: string) => Promise<string>;
 }): Promise<string> {
-  const { apiKey, model, getSystemContent, history, tools, executeTool, maxToolRounds = 8 } = options;
+  const {
+    apiKey,
+    moonshotCompletions,
+    model,
+    getSystemContent,
+    history,
+    tools,
+    executeTool,
+    maxToolRounds = 8,
+  } = options;
 
   const baseMessages: KimiRequestMessage[] = history.map((m) => {
     if (m.role === "assistant") {
@@ -86,34 +99,55 @@ export async function runKimiWithTools(options: {
     ...baseMessages,
   ];
 
-  let rounds = 0;
-  while (rounds < maxToolRounds) {
-    rounds += 1;
-    messages[0] = { role: "system", content: getSystemContent() };
-    const response = await fetch(MOONSHOT_URL, {
+  const postCompletion = async (payload: Record<string, unknown>) => {
+    if (moonshotCompletions) {
+      return moonshotCompletions(payload);
+    }
+    if (!apiKey) {
+      throw new Error("Missing Moonshot credentials");
+    }
+    return fetch(MOONSHOT_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(
-        requestBodyForModel(model, {
-          model,
-          messages,
-          tools,
-          tool_choice: "auto",
-          temperature: 0.6,
-          max_tokens: 16384,
-        })
-      ),
+      body: JSON.stringify(payload),
     });
+  };
+
+  let rounds = 0;
+  while (rounds < maxToolRounds) {
+    rounds += 1;
+    messages[0] = { role: "system", content: getSystemContent() };
+    const response = await postCompletion(
+      requestBodyForModel(model, {
+        model,
+        messages,
+        tools,
+        tool_choice: "auto",
+        temperature: 0.6,
+        max_tokens: 16384,
+      })
+    );
 
     if (!response.ok) {
       let detail = `${response.status}`;
       try {
-        const errData = await response.json();
-        detail = errData.error?.message ?? JSON.stringify(errData);
-      } catch {
+        const errData = (await response.json()) as {
+          error?: string | { message?: string };
+        };
+        if (errData?.error === "agent_quota_exceeded") {
+          throw new AgentQuotaExceededError();
+        }
+        detail =
+          typeof errData.error === "object" && errData.error?.message
+            ? errData.error.message
+            : typeof errData.error === "string"
+              ? errData.error
+              : JSON.stringify(errData);
+      } catch (e) {
+        if (e instanceof AgentQuotaExceededError) throw e;
         /* ignore */
       }
       throw new Error(detail);

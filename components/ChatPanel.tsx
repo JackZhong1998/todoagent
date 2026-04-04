@@ -22,6 +22,14 @@ import {
   KIMI_AGENT_TOOLS_WITHOUT_WEB_SEARCH,
 } from '../utils/kimiToolDefinitions';
 import { runKimiWithTools, kimiUserMessageContent } from '../utils/kimiToolChat';
+import {
+  AgentQuotaExceededError,
+  MOONSHOT_MODEL_DEFAULT,
+  moonshotDirectApiKey,
+  moonshotFetchCompletion,
+  moonshotParseCompletionJson,
+  moonshotProxyEnabled,
+} from '../utils/moonshotClient';
 import { createClerkSupabaseClient, isSupabaseConfigured } from '../utils/supabase/client';
 import {
   loadProjectConversations,
@@ -61,12 +69,14 @@ interface ChatPanelProps {
     conversationId: string,
     state: 'loading' | 'answered'
   ) => void;
+  /** 服务端返回今日免费额度用尽时（打开付费引导） */
+  onAgentQuotaExceeded?: () => void;
 }
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
 
 const MAX_SKILL_INJECT_CHARS = 80_000;
-const MOONSHOT_MODEL = import.meta.env.VITE_MOONSHOT_MODEL || 'kimi-k2.5';
+const MOONSHOT_MODEL = MOONSHOT_MODEL_DEFAULT;
 
 const MAX_CHAT_ATTACH_IMAGES = 4;
 const MAX_CHAT_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
@@ -121,6 +131,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onNewGlobalChat,
   onTodoAgentCardResolved,
   onTodoAgentCardStatusChange,
+  onAgentQuotaExceeded,
 }) => {
   const { t, language } = useLanguage();
   const { isLoggedIn, getClerkToken } = useAuth();
@@ -155,7 +166,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const autoSendDoneForNonceRef = useRef<number | null>(null);
   /** Tracks skill ids for the in-flight request (updates synchronously on import_skill). */
   const skillAttachRef = useRef<string[]>([]);
-  const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+  const useMoonshotProxy = moonshotProxyEnabled();
+  const directApiKey = moonshotDirectApiKey();
 
   const supabase = useMemo(() => {
     if (!isSupabaseConfigured() || !isLoggedIn) return null;
@@ -344,11 +356,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     [projectId]
   );
 
-  const callKimiAPIPlain = async (messages: Message[], skillDocIds: string[]): Promise<string> => {
-    if (!apiKey) {
-      throw new Error(ct.missingApiKey);
-    }
-
+  const callKimiAPIPlain = async (
+    messages: Message[],
+    skillDocIds: string[],
+    dedupeKey: string
+  ): Promise<string> => {
     const apiMessages = [
       { role: 'system' as const, content: buildSystemPrompt(false, skillDocIds, false) },
       ...messages.map((m) => ({
@@ -357,17 +369,33 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       })),
     ];
 
+    const moonshotBody = {
+      model: MOONSHOT_MODEL,
+      messages: apiMessages,
+      temperature: 1,
+    };
+
+    if (useMoonshotProxy) {
+      const res = await moonshotFetchCompletion(getClerkToken, {
+        billingKind: 'agent',
+        dedupeKey,
+        body: moonshotBody,
+      });
+      const data = await moonshotParseCompletionJson(res);
+      return String(data.choices?.[0]?.message?.content ?? '');
+    }
+
+    if (!directApiKey) {
+      throw new Error(ct.missingApiKey);
+    }
+
     const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${directApiKey}`,
       },
-      body: JSON.stringify({
-        model: MOONSHOT_MODEL,
-        messages: apiMessages,
-        temperature: 1,
-      }),
+      body: JSON.stringify(moonshotBody),
     });
 
     if (!response.ok) {
@@ -455,6 +483,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     const convId = currentConversationId;
+    const agentDedupeKey = `${convId}:${userMessage.id}`;
     skillAttachRef.current = [...(convBefore?.attachedSkillDocIds ?? [])];
     const todoIdForCard = convBefore?.todoId || initialTodo?.id;
 
@@ -476,7 +505,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     try {
-      if (!apiKey) {
+      if (useMoonshotProxy) {
+        const tok = await getClerkToken();
+        if (!tok) {
+          const err: Message = {
+            id: generateId(),
+            role: 'assistant',
+            content: ct.proxyAuthRequired,
+            timestamp: Date.now(),
+          };
+          addMessageToConversation(convId, err);
+          return;
+        }
+      } else if (!directApiKey) {
         const err: Message = {
           id: generateId(),
           role: 'assistant',
@@ -568,7 +609,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         };
 
         response = await runKimiWithTools({
-          apiKey,
+          ...(useMoonshotProxy
+            ? {
+                moonshotCompletions: (moonshotBody: Record<string, unknown>) =>
+                  moonshotFetchCompletion(getClerkToken, {
+                    billingKind: 'agent',
+                    dedupeKey: agentDedupeKey,
+                    body: moonshotBody,
+                  }),
+              }
+            : { apiKey: directApiKey }),
           model: MOONSHOT_MODEL,
           getSystemContent: () => buildSystemPrompt(true, skillAttachRef.current, allowWebSearch),
           history: messagesForModel,
@@ -576,7 +626,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           executeTool,
         });
       } else {
-        response = await callKimiAPIPlain(messagesForModel, skillAttachRef.current);
+        response = await callKimiAPIPlain(messagesForModel, skillAttachRef.current, agentDedupeKey);
       }
 
       const assistantMessage: Message = {
@@ -589,13 +639,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       addMessageToConversation(convId, assistantMessage);
     } catch (error) {
       console.error('Error getting response:', error);
-      const errorMessage: Message = {
-        id: generateId(),
-        role: 'assistant',
-        content: `${ct.errorPrefix}${error instanceof Error ? error.message : ct.errorUnknown}`,
-        timestamp: Date.now()
-      };
-      addMessageToConversation(convId, errorMessage);
+      if (error instanceof AgentQuotaExceededError) {
+        onAgentQuotaExceeded?.();
+        const errorMessage: Message = {
+          id: generateId(),
+          role: 'assistant',
+          content: ct.quotaExceededInChat,
+          timestamp: Date.now(),
+        };
+        addMessageToConversation(convId, errorMessage);
+      } else {
+        const errorMessage: Message = {
+          id: generateId(),
+          role: 'assistant',
+          content: `${ct.errorPrefix}${error instanceof Error ? error.message : ct.errorUnknown}`,
+          timestamp: Date.now(),
+        };
+        addMessageToConversation(convId, errorMessage);
+      }
     } finally {
       setLoadingConversationIds((prev) => prev.filter((id) => id !== convId));
       finishAgentCard();

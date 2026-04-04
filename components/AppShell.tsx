@@ -29,7 +29,15 @@ import { AIAnalysisPage, AnalysisResultItem, Replaceability, ANALYSIS_FAILED_TAS
 import { DocumentsPanel } from './DocumentsPanel';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 import { WorkspaceSyncProvider } from '../contexts/WorkspaceSyncContext';
+import { useAgentEntitlement } from '../hooks/useAgentEntitlement';
+import { PaywallModal } from './PaywallModal';
+import {
+  moonshotChatJson,
+  moonshotDirectApiKey,
+  moonshotProxyEnabled,
+} from '../utils/moonshotClient';
 import { useWorkspaceSupabaseSync } from '../hooks/useWorkspaceSupabaseSync';
 import { usePageSeo } from '../utils/pageSeo';
 
@@ -102,6 +110,8 @@ const parseSingleAnalysis = (raw: string): AnalysisResultItem | null => {
 
 const AppShell: React.FC = () => {
   const { t } = useLanguage();
+  const { getClerkToken, isLoggedIn } = useAuth();
+  const { checkCanOpenAgent, startStripeCheckout } = useAgentEntitlement();
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = tabFromPathname(location.pathname);
@@ -148,7 +158,10 @@ const AppShell: React.FC = () => {
   const [analysisRetryCountByTodoId, setAnalysisRetryCountByTodoId] = useState<Record<string, number>>({});
   const [sopMarkdown, setSopMarkdown] = useState(() => loadProjectSop(initialManifest.activeProjectId));
   const [sopLoading, setSopLoading] = useState(false);
-  const apiKey = import.meta.env.VITE_MOONSHOT_API_KEY || '';
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const useMoonshotProxy = moonshotProxyEnabled();
+  const directMoonshotKey = moonshotDirectApiKey();
+  const canMoonshot = useMoonshotProxy ? isLoggedIn : !!directMoonshotKey;
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const sopTailRef = useRef(Promise.resolve());
@@ -236,7 +249,7 @@ const AppShell: React.FC = () => {
   }, [isResizingChat]);
 
   useEffect(() => {
-    if (!apiKey) return;
+    if (!canMoonshot) return;
     const maxRetry = 2;
     const nextTodoToAnalyze = todos.find(todo => {
       if (!todo.isCompleted || analysisLoadingByTodoId[todo.id]) return false;
@@ -248,7 +261,7 @@ const AppShell: React.FC = () => {
     if (nextTodoToAnalyze) {
       void analyzeSingleCompletedTodo(nextTodoToAnalyze);
     }
-  }, [todos, analysisByTodoId, analysisLoadingByTodoId, analysisRetryCountByTodoId, apiKey]);
+  }, [todos, analysisByTodoId, analysisLoadingByTodoId, analysisRetryCountByTodoId, canMoonshot]);
 
   const addTodo = () => {
     const newTodo: Todo = {
@@ -266,7 +279,7 @@ const AppShell: React.FC = () => {
   };
 
   const analyzeSingleCompletedTodo = async (todo: Todo) => {
-    if (!apiKey) return;
+    if (!canMoonshot) return;
     setAnalysisLoadingByTodoId(prev => ({ ...prev, [todo.id]: true }));
     try {
       const taskPayload = {
@@ -278,33 +291,40 @@ const AppShell: React.FC = () => {
       };
       const prompt = buildSingleTaskReplaceabilityUserPrompt(taskPayload);
 
-      const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'kimi-k2.5',
-          temperature: 1,
-          messages: [
-            { role: 'system', content: TASK_ANALYSIS_SYSTEM },
-            { role: 'user', content: prompt },
-          ],
-        }),
-      });
+      const moonshotBody = {
+        model: 'kimi-k2.5',
+        temperature: 1,
+        messages: [
+          { role: 'system' as const, content: TASK_ANALYSIS_SYSTEM },
+          { role: 'user' as const, content: prompt },
+        ],
+      };
 
-      if (!response.ok) {
-        let detail = '';
-        try {
-          const err = await response.json();
-          detail = err?.error?.message || '';
-        } catch {
-          detail = await response.text();
+      let data: { choices?: Array<{ message?: { content?: string } }> };
+      if (useMoonshotProxy) {
+        data = await moonshotChatJson(getClerkToken, { billingKind: 'sop', body: moonshotBody });
+      } else {
+        const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${directMoonshotKey}`,
+          },
+          body: JSON.stringify(moonshotBody),
+        });
+
+        if (!response.ok) {
+          let detail = '';
+          try {
+            const err = await response.json();
+            detail = err?.error?.message || '';
+          } catch {
+            detail = await response.text();
+          }
+          throw new Error(`HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
         }
-        throw new Error(`HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
+        data = await response.json();
       }
-      const data = await response.json();
       const raw = data?.choices?.[0]?.message?.content || '';
       const parsed = parseSingleAnalysis(raw);
       if (!parsed) {
@@ -342,7 +362,7 @@ const AppShell: React.FC = () => {
 
   const scheduleSopUpdate = useCallback(
     (projectId: string, todo: Todo) => {
-      if (!apiKey) return;
+      if (!canMoonshot) return;
       sopTailRef.current = sopTailRef.current.then(async () => {
         setSopLoading(true);
         try {
@@ -353,35 +373,42 @@ const AppShell: React.FC = () => {
             priority: todo.priority,
             totalTimeSeconds: todo.totalTime,
           });
-          const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: 'kimi-k2.5',
-              temperature: 0.5,
-              messages: [
-                {
-                  role: 'system',
-                  content: `${KIMI_SYSTEM_PROMPT}\n\n${SOP_INCREMENTAL_SYSTEM_PROMPT}`,
-                },
-                { role: 'user', content: userPrompt },
-              ],
-            }),
-          });
-          if (!response.ok) {
-            let detail = '';
-            try {
-              const err = await response.json();
-              detail = err?.error?.message || '';
-            } catch {
-              detail = await response.text();
+          const moonshotBody = {
+            model: 'kimi-k2.5',
+            temperature: 0.5,
+            messages: [
+              {
+                role: 'system' as const,
+                content: `${KIMI_SYSTEM_PROMPT}\n\n${SOP_INCREMENTAL_SYSTEM_PROMPT}`,
+              },
+              { role: 'user' as const, content: userPrompt },
+            ],
+          };
+
+          let data: { choices?: Array<{ message?: { content?: string } }> };
+          if (useMoonshotProxy) {
+            data = await moonshotChatJson(getClerkToken, { billingKind: 'sop', body: moonshotBody });
+          } else {
+            const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${directMoonshotKey}`,
+              },
+              body: JSON.stringify(moonshotBody),
+            });
+            if (!response.ok) {
+              let detail = '';
+              try {
+                const err = await response.json();
+                detail = err?.error?.message || '';
+              } catch {
+                detail = await response.text();
+              }
+              throw new Error(`HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
             }
-            throw new Error(`HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
+            data = await response.json();
           }
-          const data = await response.json();
           const raw = String(data?.choices?.[0]?.message?.content ?? '').trim();
           if (raw) {
             saveProjectSop(projectId, raw);
@@ -394,7 +421,7 @@ const AppShell: React.FC = () => {
         }
       });
     },
-    [apiKey, t.app.noTitle]
+    [canMoonshot, useMoonshotProxy, directMoonshotKey, getClerkToken, t.app.noTitle]
   );
 
   const updateTodo = (id: string, updates: Partial<Todo>) => {
@@ -418,11 +445,25 @@ const AppShell: React.FC = () => {
     setTodos(prev => prev.filter(t => t.id !== id));
   };
 
-  const openGlobalChat = () => {
+  const openGlobalChat = async () => {
+    const ok = await checkCanOpenAgent();
+    if (!ok) {
+      setPaywallOpen(true);
+      return;
+    }
     setCurrentTodoForChat(undefined);
     setChatLaunchPayload(null);
     setIsChatOpen(true);
   };
+
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get('billing') !== 'success') return;
+    setPaywallOpen(false);
+    if (location.pathname.startsWith('/app')) {
+      navigate({ pathname: location.pathname, search: '' }, { replace: true });
+    }
+  }, [location.search, location.pathname, navigate]);
 
   const handleTodoAgentCardResolved = useCallback((todoId: string, conversationId: string) => {
     setTodos((prev) =>
@@ -449,7 +490,7 @@ const AppShell: React.FC = () => {
     []
   );
 
-  const openTodoChat = (
+  const openTodoChat = async (
     todo: Todo,
     payload?: {
       selectedText?: string;
@@ -459,6 +500,11 @@ const AppShell: React.FC = () => {
       focusConversationId?: string;
     }
   ) => {
+    const ok = await checkCanOpenAgent();
+    if (!ok) {
+      setPaywallOpen(true);
+      return;
+    }
     setCurrentTodoForChat(todo);
     if (payload?.focusConversationId) {
       setChatLaunchPayload({
@@ -600,7 +646,7 @@ const AppShell: React.FC = () => {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={openGlobalChat}
+                        onClick={() => void openGlobalChat()}
                         className="w-11 h-11 flex items-center justify-center rounded-full border border-stone-200/90 bg-white text-stone-500 transition-all duration-200 hover:border-stone-300 hover:bg-stone-50 hover:text-stone-800 active:scale-90"
                         title={t.app.aiAssistant}
                       >
@@ -624,7 +670,7 @@ const AppShell: React.FC = () => {
                             todo={todo}
                             onUpdate={updateTodo}
                             onDelete={deleteTodo}
-                            onOpenChat={(payload) => openTodoChat(todo, payload)}
+                            onOpenChat={(payload) => void openTodoChat(todo, payload)}
                           />
                         </div>
                       ))
@@ -710,9 +756,16 @@ const AppShell: React.FC = () => {
         onClose={closeChat}
         initialTodo={currentTodoForChatLive}
         launchPayload={chatLaunchPayload}
-        onNewGlobalChat={openGlobalChat}
+        onNewGlobalChat={() => void openGlobalChat()}
         onTodoAgentCardResolved={handleTodoAgentCardResolved}
         onTodoAgentCardStatusChange={handleTodoAgentCardStatusChange}
+        onAgentQuotaExceeded={() => setPaywallOpen(true)}
+      />
+
+      <PaywallModal
+        open={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        onUpgrade={startStripeCheckout}
       />
 
       <UserSettings />
