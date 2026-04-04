@@ -113,7 +113,7 @@ export function saveManifest(manifest: ProjectsManifest): void {
 }
 
 function defaultMigratedProjectName(): string {
-  return localStorage.getItem('todoagent_language') === 'en' ? 'Default project' : '默认项目';
+  return localStorage.getItem('todoagent_language') === 'zh' ? '默认项目' : 'Default project';
 }
 
 /**

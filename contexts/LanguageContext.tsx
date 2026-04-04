@@ -12,7 +12,7 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = localStorage.getItem('todoagent_language');
-    return (saved as Language) || 'zh';
+    return (saved as Language) || 'en';
   });
 
   useEffect(() => {
