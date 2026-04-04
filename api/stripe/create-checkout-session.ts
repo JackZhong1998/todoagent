@@ -48,9 +48,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const missingRelation = /does not exist|schema cache/i.test(msg);
     return res.status(500).json({
       error: 'billing_read_failed',
+      code: billingReadErr.code,
+      supabaseMessage: billingReadErr.message,
+      supabaseDetails: billingReadErr.details,
+      supabaseHint: billingReadErr.hint,
       hint: missingRelation
-        ? 'Supabase 缺少 todoagent_user_billing 表：请执行 migration 20250404120000_user_billing_agent_usage.sql'
-        : '请核对 SUPABASE_SERVICE_ROLE_KEY 与 SUPABASE_URL',
+        ? 'Supabase 缺少 todoagent_user_billing 表，或 Data API / schema 未暴露：请执行 migration 并检查 Settings → API'
+        : '请核对 SUPABASE_URL 与 Legacy service_role 密钥（eyJ 开头）是否同属一个 Supabase 项目',
     });
   }
 

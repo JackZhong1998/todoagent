@@ -30,17 +30,28 @@ export function useAgentEntitlement() {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
+    const bodyText = await r.text();
     if (!r.ok) {
-      let detail = '';
+      let detail = bodyText;
       try {
-        const j = (await r.json()) as { error?: string; hint?: string; message?: string };
-        detail = [j.hint, j.message, j.error].filter(Boolean).join('\n');
+        const j = JSON.parse(bodyText) as {
+          error?: string;
+          hint?: string;
+          message?: string;
+          supabaseMessage?: string;
+        };
+        detail = [j.hint, j.supabaseMessage, j.message, j.error].filter(Boolean).join('\n') || bodyText;
       } catch {
-        detail = await r.text();
+        /* 保持 bodyText */
       }
-      return { ok: false, detail: detail || `HTTP ${r.status}` };
+      return { ok: false, detail: detail.trim() || `HTTP ${r.status}` };
     }
-    const j = (await r.json()) as { url?: string };
+    let j: { url?: string };
+    try {
+      j = JSON.parse(bodyText) as { url?: string };
+    } catch {
+      return { ok: false, detail: '服务器返回了非 JSON 响应' };
+    }
     if (j.url) {
       window.location.href = j.url;
       return { ok: true };
