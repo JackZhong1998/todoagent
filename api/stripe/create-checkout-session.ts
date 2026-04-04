@@ -72,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${origin}/app/todo?billing=success`,
+        success_url: `${origin}/app/todo?billing=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/app/todo?billing=cancel`,
         client_reference_id: userId,
         subscription_data: {

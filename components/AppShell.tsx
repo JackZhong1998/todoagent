@@ -459,11 +459,43 @@ const AppShell: React.FC = () => {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (q.get('billing') !== 'success') return;
-    setPaywallOpen(false);
-    if (location.pathname.startsWith('/app')) {
-      navigate({ pathname: location.pathname, search: '' }, { replace: true });
-    }
-  }, [location.search, location.pathname, navigate]);
+    const sessionId = q.get('session_id');
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (sessionId && useMoonshotProxy && isLoggedIn) {
+          const token = await getClerkToken();
+          if (token) {
+            const r = await fetch('/api/stripe/confirm-checkout-session', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            });
+            if (!r.ok) {
+              const t = await r.text();
+              console.warn('[billing confirm]', r.status, t.slice(0, 400));
+            }
+          }
+        }
+      } finally {
+        if (cancelled) return;
+        setPaywallOpen(false);
+        if (location.pathname.startsWith('/app')) {
+          navigate({ pathname: location.pathname, search: '' }, { replace: true });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    location.search,
+    location.pathname,
+    navigate,
+    getClerkToken,
+    isLoggedIn,
+    useMoonshotProxy,
+  ]);
 
   const handleTodoAgentCardResolved = useCallback((todoId: string, conversationId: string) => {
     setTodos((prev) =>

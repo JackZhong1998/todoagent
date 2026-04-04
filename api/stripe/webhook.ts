@@ -2,32 +2,13 @@ import { buffer } from 'micro';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
+import { stripeExpandableId, upsertSubscriptionBilling } from '../_lib/stripeBillingUpsert.js';
 
 export const config = {
   api: {
     bodyParser: false,
   },
 };
-
-async function upsertFromSubscription(
-  supabase: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
-  userId: string,
-  sub: Stripe.Subscription,
-  customerId: string
-) {
-  const row = {
-    user_id: userId,
-    stripe_customer_id: customerId,
-    stripe_subscription_id: sub.id,
-    subscription_status: sub.status,
-    subscription_current_period_end: sub.current_period_end
-      ? new Date(sub.current_period_end * 1000).toISOString()
-      : null,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from('todoagent_user_billing').upsert(row, { onConflict: 'user_id' });
-  if (error) console.error('[stripe webhook] upsert', error);
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -66,20 +47,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.mode !== 'subscription') break;
-        const subId = session.subscription;
-        const customerId = session.customer;
+        const subId = stripeExpandableId(
+          session.subscription as string | { id: string } | null | undefined
+        );
+        const customerId = stripeExpandableId(
+          session.customer as string | { id: string } | null | undefined
+        );
         const userId =
           session.client_reference_id ||
           (typeof session.metadata?.clerk_user_id === 'string' ? session.metadata.clerk_user_id : null);
-        if (!userId || typeof subId !== 'string' || typeof customerId !== 'string') break;
+        if (!userId || !subId || !customerId) break;
         const sub = await stripe.subscriptions.retrieve(subId);
-        await upsertFromSubscription(supabase, userId, sub, customerId);
+        await upsertSubscriptionBilling(supabase, userId, sub, customerId);
         break;
       }
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
-        const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+        const customerId = stripeExpandableId(
+          sub.customer as string | { id: string } | null | undefined
+        );
         let userId = sub.metadata?.clerk_user_id;
         if (!userId && customerId) {
           const { data: billing } = await supabase
@@ -107,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               { onConflict: 'user_id' }
             );
         } else {
-          await upsertFromSubscription(supabase, userId, sub, customerId);
+          await upsertSubscriptionBilling(supabase, userId, sub, customerId);
         }
         break;
       }
