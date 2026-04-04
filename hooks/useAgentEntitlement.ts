@@ -13,12 +13,27 @@ export function useAgentEntitlement() {
     const r = await fetch('/api/billing/entitlement', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!r.ok) return false;
-    const j = (await r.json()) as {
+    const entText = await r.text();
+    if (!r.ok) {
+      try {
+        const errBody = JSON.parse(entText) as { message?: string; hint?: string; error?: string };
+        console.warn('[entitlement]', r.status, errBody);
+      } catch {
+        console.warn('[entitlement]', r.status, entText.slice(0, 200));
+      }
+      return false;
+    }
+    let j: {
       billingEnabled?: boolean;
       isPaid?: boolean;
       remainingFreeToday?: number;
     };
+    try {
+      j = JSON.parse(entText) as typeof j;
+    } catch {
+      console.warn('[entitlement] invalid JSON', entText.slice(0, 120));
+      return false;
+    }
     if (j.billingEnabled === false) return true;
     return !!j.isPaid || (typeof j.remainingFreeToday === 'number' && j.remainingFreeToday > 0);
   }, [getClerkToken, isLoggedIn]);

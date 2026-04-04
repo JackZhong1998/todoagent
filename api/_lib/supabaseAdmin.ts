@@ -5,7 +5,12 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!rawUrl || !key) return null;
   const url = rawUrl.replace(/\/+$/, '');
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  try {
+    return createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (e) {
+    console.error('[supabaseAdmin] createClient failed', e);
+    return null;
+  }
 }

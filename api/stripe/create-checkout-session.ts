@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Stripe from 'stripe';
 import { getClerkUserIdFromRequest } from '../_lib/auth';
 import { getSupabaseAdmin } from '../_lib/supabaseAdmin';
+import { sendJson } from '../_lib/safeJson';
 
 function siteOrigin(req: VercelRequest): string {
   const env = process.env.SITE_URL?.trim() || process.env.VITE_SITE_URL?.trim();
@@ -15,79 +15,89 @@ function siteOrigin(req: VercelRequest): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'method_not_allowed' });
-  }
-
-  const userId = await getClerkUserIdFromRequest(req);
-  if (!userId) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-
-  const secret = process.env.STRIPE_SECRET_KEY?.trim();
-  const priceId = process.env.STRIPE_PRICE_ID?.trim();
-  if (!secret || !priceId) {
-    return res.status(503).json({ error: 'stripe_not_configured' });
-  }
-
-  const supabase = getSupabaseAdmin();
-  if (!supabase) {
-    return res.status(503).json({ error: 'supabase_not_configured' });
-  }
-
-  const { data: row, error: billingReadErr } = await supabase
-    .from('todoagent_user_billing')
-    .select('stripe_customer_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (billingReadErr) {
-    console.error('[checkout] billing read', billingReadErr);
-    const msg = billingReadErr.message || String(billingReadErr);
-    const missingRelation = /does not exist|schema cache/i.test(msg);
-    return res.status(500).json({
-      error: 'billing_read_failed',
-      code: billingReadErr.code,
-      supabaseMessage: billingReadErr.message,
-      supabaseDetails: billingReadErr.details,
-      supabaseHint: billingReadErr.hint,
-      hint: missingRelation
-        ? 'Supabase 缺少 todoagent_user_billing 表，或 Data API / schema 未暴露：请执行 migration 并检查 Settings → API'
-        : '请核对 SUPABASE_URL 与 Legacy service_role 密钥（eyJ 开头）是否同属一个 Supabase 项目',
-    });
-  }
-
-  const existingCustomerId =
-    row && typeof (row as { stripe_customer_id?: string }).stripe_customer_id === 'string'
-      ? (row as { stripe_customer_id: string }).stripe_customer_id.trim()
-      : '';
-
-  const stripe = new Stripe(secret, { apiVersion: '2025-02-24.acacia' });
-  const origin = siteOrigin(req);
-
   try {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/app/todo?billing=success`,
-      cancel_url: `${origin}/app/todo?billing=cancel`,
-      client_reference_id: userId,
-      subscription_data: {
-        metadata: { clerk_user_id: userId },
-      },
-      metadata: { clerk_user_id: userId },
-      ...(existingCustomerId
-        ? { customer: existingCustomerId }
-        : { customer_creation: 'always' as const }),
-    });
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      return sendJson(res, 405, { error: 'method_not_allowed' });
+    }
 
-    return res.status(200).json({ url: session.url });
+    const userId = await getClerkUserIdFromRequest(req);
+    if (!userId) {
+      return sendJson(res, 401, { error: 'unauthorized' });
+    }
+
+    const secret = process.env.STRIPE_SECRET_KEY?.trim();
+    const priceId = process.env.STRIPE_PRICE_ID?.trim();
+    if (!secret || !priceId) {
+      return sendJson(res, 503, { error: 'stripe_not_configured' });
+    }
+
+    const supabase = getSupabaseAdmin();
+    if (!supabase) {
+      return sendJson(res, 503, { error: 'supabase_not_configured' });
+    }
+
+    const { data: row, error: billingReadErr } = await supabase
+      .from('todoagent_user_billing')
+      .select('stripe_customer_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (billingReadErr) {
+      console.error('[checkout] billing read', billingReadErr);
+      const msg = billingReadErr.message || String(billingReadErr);
+      const missingRelation = /does not exist|schema cache/i.test(msg);
+      return sendJson(res, 500, {
+        error: 'billing_read_failed',
+        code: billingReadErr.code,
+        supabaseMessage: billingReadErr.message,
+        supabaseDetails: billingReadErr.details,
+        supabaseHint: billingReadErr.hint,
+        hint: missingRelation
+          ? 'Supabase 缺少 todoagent_user_billing 表，或 Data API / schema 未暴露：请执行 migration 并检查 Settings → API'
+          : '请核对 SUPABASE_URL 与 Legacy service_role 密钥（eyJ 开头）是否同属一个 Supabase 项目',
+      });
+    }
+
+    const existingCustomerId =
+      row && typeof (row as { stripe_customer_id?: string }).stripe_customer_id === 'string'
+        ? (row as { stripe_customer_id: string }).stripe_customer_id.trim()
+        : '';
+
+    const { default: Stripe } = await import('stripe');
+    const stripe = new Stripe(secret, { apiVersion: '2025-02-24.acacia' });
+    const origin = siteOrigin(req);
+
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${origin}/app/todo?billing=success`,
+        cancel_url: `${origin}/app/todo?billing=cancel`,
+        client_reference_id: userId,
+        subscription_data: {
+          metadata: { clerk_user_id: userId },
+        },
+        metadata: { clerk_user_id: userId },
+        ...(existingCustomerId
+          ? { customer: existingCustomerId }
+          : { customer_creation: 'always' as const }),
+      });
+
+      return sendJson(res, 200, { url: session.url });
+    } catch (e: unknown) {
+      console.error('[checkout] stripe', e);
+      const message = e instanceof Error ? e.message : String(e);
+      return sendJson(res, 502, {
+        error: 'stripe_checkout_failed',
+        message,
+      });
+    }
   } catch (e: unknown) {
-    console.error('[checkout] stripe', e);
+    console.error('[checkout] unhandled', e);
     const message = e instanceof Error ? e.message : String(e);
-    return res.status(502).json({
-      error: 'stripe_checkout_failed',
+    return sendJson(res, 500, {
+      error: 'internal_crash',
       message,
     });
   }
