@@ -1,4 +1,3 @@
-import { verifyToken } from '@clerk/backend';
 import type { VercelRequest } from '@vercel/node';
 
 export async function getClerkUserIdFromRequest(req: VercelRequest): Promise<string | null> {
@@ -9,10 +8,12 @@ export async function getClerkUserIdFromRequest(req: VercelRequest): Promise<str
   const secret = process.env.CLERK_SECRET_KEY?.trim();
   if (!secret) return null;
   try {
+    const { verifyToken } = await import('@clerk/backend');
     const payload = await verifyToken(token, { secretKey: secret });
     const sub = payload.sub;
     return typeof sub === 'string' && sub.length > 0 ? sub : null;
-  } catch {
+  } catch (e) {
+    console.error('[auth] verifyToken/import', e);
     return null;
   }
 }
