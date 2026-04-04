@@ -52,8 +52,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ]);
 
   if (bErr || uErr) {
-    console.error('[entitlement]', bErr || uErr);
-    return res.status(500).json({ error: 'read_failed' });
+    const err = bErr ?? uErr;
+    if (!err) {
+      return res.status(500).json({ error: 'read_failed' });
+    }
+    console.error('[entitlement]', err);
+    const msg = err.message || String(err);
+    const missingRelation =
+      /does not exist|schema cache/i.test(msg) || err.code === '42P01' || err.code === 'PGRST205';
+    return res.status(500).json({
+      error: 'read_failed',
+      code: err.code,
+      /** 给站长排查：表未创建时 PostgREST 会报 relation does not exist */
+      hint: missingRelation
+        ? 'Supabase 中可能尚未执行计费相关 migration（todoagent_user_billing / todoagent_agent_daily_usage）。请在 SQL Editor 运行 supabase/migrations/20250404120000_user_billing_agent_usage.sql'
+        : '请核对 Vercel 的 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY 是否正确',
+    });
   }
 
   const end = billingRow?.subscription_current_period_end

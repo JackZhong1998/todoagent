@@ -5,7 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 type PaywallModalProps = {
   open: boolean;
   onClose: () => void;
-  onUpgrade: () => Promise<{ ok: boolean }>;
+  onUpgrade: () => Promise<{ ok: boolean; detail?: string }>;
 };
 
 export const PaywallModal: React.FC<PaywallModalProps> = ({ open, onClose, onUpgrade }) => {
@@ -18,8 +18,8 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ open, onClose, onUpg
   const handleUpgrade = async () => {
     setLoading(true);
     try {
-      const { ok } = await onUpgrade();
-      if (!ok) window.alert(b.checkoutError);
+      const { ok, detail } = await onUpgrade();
+      if (!ok) window.alert(detail ? `${b.checkoutError}\n\n${detail}` : b.checkoutError);
     } finally {
       setLoading(false);
     }
