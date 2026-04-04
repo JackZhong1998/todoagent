@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClerkUserIdFromRequest } from '../_lib/auth';
-import { getSupabaseAdmin } from '../_lib/supabaseAdmin';
-import { billingBackendConfigured } from '../_lib/billingFlags';
+import { getClerkUserIdFromRequest } from '../_lib/auth.js';
+import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
+import { billingBackendConfigured } from '../_lib/billingFlags.js';
 
 const MOONSHOT_URL = 'https://api.moonshot.cn/v1/chat/completions';
 

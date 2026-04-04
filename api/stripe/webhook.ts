@@ -1,7 +1,7 @@
 import { buffer } from 'micro';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
-import { getSupabaseAdmin } from '../_lib/supabaseAdmin';
+import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
 
 export const config = {
   api: {

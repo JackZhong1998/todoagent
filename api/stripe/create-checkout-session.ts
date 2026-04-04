@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClerkUserIdFromRequest } from '../_lib/auth';
-import { getSupabaseAdmin } from '../_lib/supabaseAdmin';
-import { sendJson } from '../_lib/safeJson';
+import { getClerkUserIdFromRequest } from '../_lib/auth.js';
+import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
+import { sendJson } from '../_lib/safeJson.js';
 
 function siteOrigin(req: VercelRequest): string {
   const env = process.env.SITE_URL?.trim() || process.env.VITE_SITE_URL?.trim();

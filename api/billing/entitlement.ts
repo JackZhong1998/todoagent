@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClerkUserIdFromRequest } from '../_lib/auth';
-import { getSupabaseAdmin } from '../_lib/supabaseAdmin';
-import { billingBackendConfigured, skipAgentBilling } from '../_lib/billingFlags';
-import { sendJson } from '../_lib/safeJson';
+import { getClerkUserIdFromRequest } from '../_lib/auth.js';
+import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
+import { billingBackendConfigured, skipAgentBilling } from '../_lib/billingFlags.js';
+import { sendJson } from '../_lib/safeJson.js';
 
 const FREE_DAILY_LIMIT = 10;
 
