@@ -11,6 +11,10 @@ export const translations = {
       continue: 'Continue',
       signUp: 'Don\'t have an account?',
       signUpLink: 'Sign up',
+      clerkNotConfigured:
+        'Clerk is not configured. In Vercel → Settings → Environment Variables, add VITE_CLERK_PUBLISHABLE_KEY (your pk_ key), then redeploy.',
+      clerkUnavailableTitle: 'Sign-in unavailable',
+      close: 'Close',
     },
     app: {
       all: 'ALL',
@@ -318,6 +322,10 @@ export const translations = {
       continue: '继续',
       signUp: '没有账户？',
       signUpLink: '注册',
+      clerkNotConfigured:
+        '未配置 Clerk：在 Vercel → Settings → Environment Variables 中添加 VITE_CLERK_PUBLISHABLE_KEY（pk_ 开头的公钥），保存后重新部署。',
+      clerkUnavailableTitle: '暂时无法登录',
+      close: '关闭',
     },
     app: {
       all: '全部',

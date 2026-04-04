@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { X } from 'lucide-react';
 import { SignIn, SignUp, useUser } from '@clerk/clerk-react';
 
-export const LoginModal: React.FC = () => {
+const LoginModalClerk: React.FC = () => {
   const { t } = useLanguage();
   const { showLoginModal, setShowLoginModal, loginMode, loginStep } = useAuth();
   const { user } = useUser();
@@ -19,7 +19,6 @@ export const LoginModal: React.FC = () => {
   }, [showLoginModal, loginStep]);
 
   useEffect(() => {
-    // 仅在登录弹窗流程中完成鉴权后跳转，避免已登录用户被全局强制重定向到 /app
     if (!showLoginModal || !user) return;
     setShowLoginModal(false);
     navigate(targetPath, { replace: true });
@@ -35,11 +34,11 @@ export const LoginModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div 
+      <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={() => setShowLoginModal(false)}
       />
-      
+
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         <button
           onClick={() => setShowLoginModal(false)}
@@ -52,9 +51,7 @@ export const LoginModal: React.FC = () => {
           <div className="p-6">
             <div className="pt-2 pb-5">
               <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-              <p className="mt-2 text-sm text-gray-600">
-                {t.loginModal.promptBeforeAuth}
-              </p>
+              <p className="mt-2 text-sm text-gray-600">{t.loginModal.promptBeforeAuth}</p>
             </div>
 
             <div className="space-y-3">
@@ -98,4 +95,48 @@ export const LoginModal: React.FC = () => {
       </div>
     </div>
   );
+};
+
+/** 无 Clerk 时展示，不调用 useUser */
+const LoginModalFallback: React.FC = () => {
+  const { t } = useLanguage();
+  const { showLoginModal, setShowLoginModal } = useAuth();
+
+  if (!showLoginModal) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={() => setShowLoginModal(false)}
+      />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <button
+          type="button"
+          onClick={() => setShowLoginModal(false)}
+          className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 rounded-lg"
+          aria-label="Close"
+        >
+          <X size={20} />
+        </button>
+        <h3 className="text-lg font-bold text-gray-900 pr-8">{t.loginModal.clerkUnavailableTitle}</h3>
+        <p className="mt-3 text-sm text-gray-600 leading-relaxed">{t.loginModal.clerkNotConfigured}</p>
+        <button
+          type="button"
+          onClick={() => setShowLoginModal(false)}
+          className="mt-5 w-full py-2.5 rounded-lg bg-gray-100 text-gray-800 font-medium hover:bg-gray-200"
+        >
+          {t.loginModal.close}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const LoginModal: React.FC = () => {
+  const { clerkEnabled } = useAuth();
+  if (!clerkEnabled) {
+    return <LoginModalFallback />;
+  }
+  return <LoginModalClerk />;
 };
