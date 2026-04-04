@@ -79,9 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           metadata: { clerk_user_id: userId },
         },
         metadata: { clerk_user_id: userId },
-        ...(existingCustomerId
-          ? { customer: existingCustomerId }
-          : { customer_creation: 'always' as const }),
+        ...(existingCustomerId ? { customer: existingCustomerId } : {}),
       });
 
       return sendJson(res, 200, { url: session.url });
