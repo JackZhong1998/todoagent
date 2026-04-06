@@ -1,4 +1,5 @@
 import type { AnalysisResultItem } from '../components/AIAnalysisPage';
+import type { AgentHomeAiSnapshot } from './agentHomeSummary';
 import type { Conversation, Todo, WorkspaceDoc } from '../types';
 
 const PROJECTS_MANIFEST_KEY = 'todoagent_projects_v1';
@@ -38,6 +39,10 @@ function sopKey(projectId: string) {
 
 function conversationsKey(projectId: string) {
   return `todoagent_p_${projectId}_conversations`;
+}
+
+function agentHomeAiKey(projectId: string) {
+  return `todoagent_p_${projectId}_agent_home_ai_v1`;
 }
 
 function safeParse<T>(raw: string | null, fallback: T): T {
@@ -89,10 +94,16 @@ export function saveProjectSop(projectId: string, markdown: string): void {
 
 /** Cross-panel refresh when another view writes docs (e.g. chat imports a skill). */
 export const PROJECT_DOCS_UPDATED_EVENT = 'todoagent-project-docs-updated';
+export const PROJECT_CONVERSATIONS_UPDATED_EVENT = 'todoagent-project-conversations-updated';
 
 export function notifyProjectDocsUpdated(projectId: string): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(PROJECT_DOCS_UPDATED_EVENT, { detail: { projectId } }));
+}
+
+export function notifyProjectConversationsUpdated(projectId: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(PROJECT_CONVERSATIONS_UPDATED_EVENT, { detail: { projectId } }));
 }
 
 export function loadProjectConversations(projectId: string): Conversation[] {
@@ -102,6 +113,30 @@ export function loadProjectConversations(projectId: string): Conversation[] {
 
 export function saveProjectConversations(projectId: string, conversations: Conversation[]): void {
   localStorage.setItem(conversationsKey(projectId), JSON.stringify(conversations));
+  notifyProjectConversationsUpdated(projectId);
+}
+
+export function loadAgentHomeAiSnapshot(projectId: string): AgentHomeAiSnapshot | null {
+  const raw = localStorage.getItem(agentHomeAiKey(projectId));
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as AgentHomeAiSnapshot;
+    if (!o || typeof o !== 'object') return null;
+    const fix = (v: unknown) =>
+      Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : [];
+    return {
+      userUnderstanding: fix(o.userUnderstanding),
+      projectUnderstanding: fix(o.projectUnderstanding),
+      preferencesAndNeeds: fix(o.preferencesAndNeeds),
+      generatedAt: typeof o.generatedAt === 'number' ? o.generatedAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveAgentHomeAiSnapshot(projectId: string, snapshot: AgentHomeAiSnapshot): void {
+  localStorage.setItem(agentHomeAiKey(projectId), JSON.stringify(snapshot));
 }
 
 export function loadManifest(): ProjectsManifest | null {

@@ -16,6 +16,7 @@ import {
   stripHtmlTags,
   SYSTEM_PROMPT,
 } from '../utils';
+import { agentPersonalityPromptAddon } from '../utils/agentPersonality';
 import {
   buildAgentToolsSystemPrompt,
   KIMI_AGENT_TOOLS,
@@ -248,6 +249,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setInputText('');
   }, [ct.newGlobalTitle]);
 
+  const createNewTodoConversation = useCallback(() => {
+    if (!initialTodo) return;
+    const newConversation: Conversation = {
+      id: generateId(),
+      title: initialTodo.title || ct.newTodoTitle,
+      messages: [],
+      todoId: initialTodo.id,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setConversations((prev) => [newConversation, ...prev]);
+    setCurrentConversationId(newConversation.id);
+    setShowHistory(false);
+    setInputText('');
+  }, [initialTodo, ct.newTodoTitle]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -349,11 +366,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const buildSystemPrompt = useCallback(
     (includeToolInstructions: boolean, skillDocIds: string[], webSearch: boolean) => {
       let s = `${KIMI_SYSTEM_PROMPT}\n\n${SYSTEM_PROMPT}`;
+      s += agentPersonalityPromptAddon(projectId, language === 'zh' ? 'zh' : 'en');
       if (includeToolInstructions) s += `\n\n${buildAgentToolsSystemPrompt({ webSearch })}`;
       s += buildSkillInjectionBlock(projectId, skillDocIds);
       return s;
     },
-    [projectId]
+      [projectId, language]
   );
 
   const callKimiAPIPlain = async (
@@ -711,15 +729,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
         
         <div className="flex items-center gap-1">
-          {!initialTodo && (
-            <button
-              onClick={createNewGlobalConversation}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title={ct.newChatTooltip}
-            >
-              <Plus size={18} />
-            </button>
-          )}
+          <button
+            onClick={initialTodo ? createNewTodoConversation : createNewGlobalConversation}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            title={ct.newChatTooltip}
+          >
+            <Plus size={18} />
+          </button>
           <button
             onClick={() => setShowHistory(!showHistory)}
             className={`p-2 rounded-lg transition-colors ${

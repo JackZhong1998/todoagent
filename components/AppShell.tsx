@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, FileText } from 'lucide-react';
+import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, House } from 'lucide-react';
 import { Todo, Priority, FilterType } from '../types';
 import { generateId, stripHtmlTags } from '../utils';
 import { setAgentCardStateInHtml } from '../utils/todoAgentCard';
@@ -26,7 +26,7 @@ import { TodoItem } from './TodoItem';
 import { ChatPanel } from './ChatPanel';
 import { UserSettings } from './UserSettings';
 import { AIAnalysisPage, AnalysisResultItem, Replaceability, ANALYSIS_FAILED_TASK_TYPE } from './AIAnalysisPage';
-import { DocumentsPanel } from './DocumentsPanel';
+import { AgentHomePanel } from './AgentHomePanel';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -42,6 +42,47 @@ import { useWorkspaceSupabaseSync } from '../hooks/useWorkspaceSupabaseSync';
 import { usePageSeo } from '../utils/pageSeo';
 
 type AppTab = 'todo' | 'stats' | 'docs';
+
+type ActivityDay = {
+  created: number;
+  completed: number;
+};
+
+type ActivityMap = Record<string, ActivityDay>;
+
+type ToastPayload = {
+  id: number;
+  title: string;
+  subtitle: string;
+};
+
+const ACTIVITY_STORAGE_KEY = 'todoagent_daily_activity_v1';
+
+const TYPING_TOAST_CANDIDATES = [
+  { zh: '开工了，进入节奏。', en: 'You are in the zone.' },
+  { zh: '先写一行，也是在前进。', en: 'One line is still progress.' },
+  { zh: '专注此刻，事情会变简单。', en: 'Focus now, simplify later.' },
+  { zh: '你的注意力正在复利。', en: 'Your focus compounds.' },
+  { zh: '继续推进，别被打断。', en: 'Keep moving, stay unbroken.' },
+  { zh: '你在把目标变成现实。', en: 'You are making it real.' },
+  { zh: '节奏很好，继续。', en: 'Great rhythm. Keep going.' },
+  { zh: '每次输入都在积累胜势。', en: 'Every keystroke builds momentum.' },
+  { zh: '今天的你很稳。', en: 'You are steady today.' },
+  { zh: '现在就把这件事做完。', en: 'Finish this one now.' },
+] as const;
+
+const COMPLETE_TOAST_CANDIDATES = [
+  { zh: '完成一项，掌控感+1。', en: 'One done, one win.' },
+  { zh: '非常好，继续连胜。', en: 'Excellent. Keep the streak.' },
+  { zh: '你在兑现计划。', en: 'You are honoring your plan.' },
+  { zh: '又完成一个，效率在线。', en: 'Another one complete. Strong pace.' },
+  { zh: '状态很棒，继续清空列表。', en: 'Great state. Keep clearing.' },
+  { zh: '执行力拉满。', en: 'Execution at full power.' },
+  { zh: '清晰行动，稳定输出。', en: 'Clear actions, steady output.' },
+  { zh: '任务落地，成就感拉满。', en: 'Task shipped, confidence up.' },
+  { zh: '今天你非常高效。', en: 'You are highly effective today.' },
+  { zh: '漂亮！继续下一个目标。', en: 'Beautiful. On to the next goal.' },
+] as const;
 
 function appPathFromTab(tab: AppTab): string {
   if (tab === 'stats') return '/app/stats';
@@ -68,6 +109,27 @@ const normalizeReplaceability = (value: string): Replaceability => {
   if (value.includes('不可替代')) return '不可替代';
   if (value.includes('可替代')) return '可替代';
   return '不清楚';
+};
+
+const dayKeyFromTs = (ts: number) => {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const loadActivityMap = (): ActivityMap => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as ActivityMap;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
 };
 
 const parseSingleAnalysis = (raw: string): AnalysisResultItem | null => {
@@ -109,7 +171,7 @@ const parseSingleAnalysis = (raw: string): AnalysisResultItem | null => {
 };
 
 const AppShell: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { getClerkToken, isLoggedIn } = useAuth();
   const { checkCanOpenAgent, startStripeCheckout } = useAgentEntitlement();
   const location = useLocation();
@@ -138,7 +200,6 @@ const AppShell: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>(() => loadProjectTodos(initialManifest.activeProjectId));
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const [docsListScope, setDocsListScope] = useState<'user' | 'skill'>('user');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(420);
   const [isResizingChat, setIsResizingChat] = useState(false);
@@ -159,12 +220,60 @@ const AppShell: React.FC = () => {
   const [sopMarkdown, setSopMarkdown] = useState(() => loadProjectSop(initialManifest.activeProjectId));
   const [sopLoading, setSopLoading] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [activityMap, setActivityMap] = useState<ActivityMap>(() => loadActivityMap());
+  const [toast, setToast] = useState<ToastPayload | null>(null);
   const useMoonshotProxy = moonshotProxyEnabled();
   const directMoonshotKey = moonshotDirectApiKey();
   const canMoonshot = useMoonshotProxy ? isLoggedIn : !!directMoonshotKey;
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const sopTailRef = useRef(Promise.resolve());
+  const toastTimerRef = useRef<number | null>(null);
+  const typingToastShownTodoIdsRef = useRef<Record<string, boolean>>({});
+
+  const showMotivationToast = useCallback(
+    (kind: 'typing' | 'completed') => {
+      const pool = kind === 'typing' ? TYPING_TOAST_CANDIDATES : COMPLETE_TOAST_CANDIDATES;
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      const title = language === 'zh' ? picked.zh : picked.en;
+      const subtitle =
+        language === 'zh'
+          ? kind === 'completed'
+            ? 'AI 正在分析你的完成轨迹。'
+            : '保持专注，继续推进。'
+          : kind === 'completed'
+            ? 'AI is analyzing this completion now.'
+            : 'Stay focused and keep shipping.';
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      setToast({ id: Date.now(), title, subtitle });
+      toastTimerRef.current = window.setTimeout(() => setToast(null), 2200);
+    },
+    [language]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(activityMap));
+    }
+  }, [activityMap]);
+
+  const bumpDayActivity = useCallback((kind: 'created' | 'completed') => {
+    const key = dayKeyFromTs(Date.now());
+    setActivityMap((prev) => {
+      const base = prev[key] || { created: 0, completed: 0 };
+      const next: ActivityDay =
+        kind === 'created'
+          ? { ...base, created: base.created + 1 }
+          : { ...base, completed: base.completed + 1 };
+      return { ...prev, [key]: next };
+    });
+  }, []);
 
   const { bumpRemotePush } = useWorkspaceSupabaseSync({
     projects,
@@ -276,6 +385,7 @@ const AppShell: React.FC = () => {
       isCompleted: false,
     };
     setTodos([newTodo, ...todos]);
+    bumpDayActivity('created');
   };
 
   const analyzeSingleCompletedTodo = async (todo: Todo) => {
@@ -426,15 +536,37 @@ const AppShell: React.FC = () => {
 
   const updateTodo = (id: string, updates: Partial<Todo>) => {
     let completedTodoForAnalysis: Todo | null = null;
+    let didCompleteThisTurn = false;
+    let shouldShowTypingToast = false;
     const projectId = activeProjectId;
     setTodos(prev => prev.map(t => {
       if (t.id !== id) return t;
       const next = { ...t, ...updates };
       if (!t.isCompleted && next.isCompleted) {
         completedTodoForAnalysis = next;
+        didCompleteThisTurn = true;
+      }
+      const prevPlain = stripHtmlTags(t.content || '').trim();
+      const nextPlain = stripHtmlTags(next.content || '').trim();
+      const hadNoInput = !t.title.trim() && !prevPlain;
+      const hasInputNow = !!next.title.trim() || !!nextPlain;
+      if (
+        !typingToastShownTodoIdsRef.current[t.id] &&
+        hadNoInput &&
+        hasInputNow &&
+        !t.isCompleted &&
+        !next.isCompleted
+      ) {
+        typingToastShownTodoIdsRef.current[t.id] = true;
+        shouldShowTypingToast = true;
       }
       return next;
     }));
+    if (shouldShowTypingToast) showMotivationToast('typing');
+    if (didCompleteThisTurn) {
+      bumpDayActivity('completed');
+      showMotivationToast('completed');
+    }
     if (completedTodoForAnalysis) {
       void analyzeSingleCompletedTodo(completedTodoForAnalysis);
       scheduleSopUpdate(projectId, completedTodoForAnalysis);
@@ -445,15 +577,21 @@ const AppShell: React.FC = () => {
     setTodos(prev => prev.filter(t => t.id !== id));
   };
 
-  const openGlobalChat = async () => {
-    const ok = await checkCanOpenAgent();
-    if (!ok) {
-      setPaywallOpen(true);
-      return;
-    }
+  const openGlobalChat = () => {
     setCurrentTodoForChat(undefined);
     setChatLaunchPayload(null);
     setIsChatOpen(true);
+    void (async () => {
+      try {
+        const ok = await checkCanOpenAgent();
+        if (!ok) {
+          setIsChatOpen(false);
+          setPaywallOpen(true);
+        }
+      } catch {
+        // Network/auth transient failures should not freeze the UI.
+      }
+    })();
   };
 
   useEffect(() => {
@@ -522,7 +660,7 @@ const AppShell: React.FC = () => {
     []
   );
 
-  const openTodoChat = async (
+  const openTodoChat = (
     todo: Todo,
     payload?: {
       selectedText?: string;
@@ -532,11 +670,6 @@ const AppShell: React.FC = () => {
       focusConversationId?: string;
     }
   ) => {
-    const ok = await checkCanOpenAgent();
-    if (!ok) {
-      setPaywallOpen(true);
-      return;
-    }
     setCurrentTodoForChat(todo);
     if (payload?.focusConversationId) {
       setChatLaunchPayload({
@@ -560,6 +693,19 @@ const AppShell: React.FC = () => {
       setChatLaunchPayload(null);
     }
     setIsChatOpen(true);
+    void (async () => {
+      try {
+        const ok = await checkCanOpenAgent();
+        if (!ok) {
+          setIsChatOpen(false);
+          setCurrentTodoForChat(undefined);
+          setChatLaunchPayload(null);
+          setPaywallOpen(true);
+        }
+      } catch {
+        // Ignore transient check errors to keep opening interaction responsive.
+      }
+    })();
   };
 
   const closeChat = () => {
@@ -592,7 +738,7 @@ const AppShell: React.FC = () => {
   const navItems: { id: AppTab; label: string; icon: typeof ListTodo }[] = [
     { id: 'todo', label: t.nav.todo, icon: ListTodo },
     { id: 'stats', label: t.nav.stats, icon: BarChart3 },
-    { id: 'docs', label: t.nav.docs, icon: FileText },
+    { id: 'docs', label: t.nav.agentHome, icon: House },
   ];
 
   const exitProjectNameEditMode = useCallback(() => {
@@ -610,9 +756,49 @@ const AppShell: React.FC = () => {
     </button>
   );
 
+  const activitySummary = useMemo(() => {
+    const todayKey = dayKeyFromTs(Date.now());
+    const today = activityMap[todayKey] || { created: 0, completed: 0 };
+    let streak = 0;
+    for (let i = 0; i < 30; i += 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = dayKeyFromTs(d.getTime());
+      const day = activityMap[key];
+      if (!day || day.completed <= 0) break;
+      streak += 1;
+    }
+    const weeklyDone = Array.from({ length: 7 }).reduce((acc, _, idx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - idx);
+      const key = dayKeyFromTs(d.getTime());
+      return acc + (activityMap[key]?.completed || 0);
+    }, 0);
+    const streakGoal = 7;
+    const streakProgress = Math.min(100, Math.round((streak / streakGoal) * 100));
+    return {
+      ...today,
+      streak,
+      weeklyDone,
+      streakGoal,
+      streakProgress,
+    };
+  }, [activityMap]);
+
   return (
     <WorkspaceSyncProvider bumpSync={bumpRemotePush}>
     <div className="min-h-screen bg-[#fcfcfc] flex">
+      {toast ? (
+        <div className="pointer-events-none fixed top-4 left-1/2 z-[80] -translate-x-1/2">
+          <div
+            key={toast.id}
+            className="rounded-2xl border border-emerald-200/90 bg-white/95 px-5 py-3 shadow-xl shadow-emerald-100/70 backdrop-blur-sm"
+          >
+            <p className="text-sm font-semibold text-emerald-700">{toast.title}</p>
+            <p className="text-xs text-emerald-600/90">{toast.subtitle}</p>
+          </div>
+        </div>
+      ) : null}
       <aside
         className={`
           flex-shrink-0 h-screen bg-[#fafafa] border-r border-gray-100 transition-[width] duration-300 ease-out overflow-hidden
@@ -649,6 +835,57 @@ const AppShell: React.FC = () => {
                 {label}
               </button>
             ))}
+            <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold tracking-wide text-gray-400 uppercase">
+                  {language === 'zh' ? '今日专注' : 'Today Focus'}
+                </p>
+                <span className="text-[10px] font-medium text-emerald-600">
+                  {language === 'zh' ? `连续 ${activitySummary.streak} 天` : `${activitySummary.streak}-day streak`}
+                </span>
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-gray-50 px-2 py-2">
+                  <p className="text-[10px] text-gray-400">{language === 'zh' ? '已创建' : 'Created'}</p>
+                  <p className="text-lg font-semibold text-gray-800">{activitySummary.created}</p>
+                </div>
+                <div className="rounded-xl bg-emerald-50 px-2 py-2">
+                  <p className="text-[10px] text-emerald-600/70">{language === 'zh' ? '已完成' : 'Done'}</p>
+                  <p className="text-lg font-semibold text-emerald-700">{activitySummary.completed}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/50 px-2 py-2">
+                <div className="flex items-center justify-between text-[10px] text-emerald-700/80 mb-1">
+                  <span>{language === 'zh' ? '7天专注骑行' : '7-Day Focus Ride'}</span>
+                  <span>{activitySummary.streak}/{activitySummary.streakGoal}</span>
+                </div>
+                <div className="relative h-8">
+                  <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-emerald-100" />
+                  <div
+                    className="absolute left-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-gradient-to-r from-emerald-300 to-emerald-500 transition-all duration-700"
+                    style={{ width: `${activitySummary.streakProgress}%` }}
+                  />
+                  <div
+                    className="absolute top-1/2 text-base transition-all duration-700"
+                    style={{
+                      left: `calc(${activitySummary.streakProgress}% - 10px)`,
+                      transform: 'translateY(-50%) scaleX(-1)',
+                    }}
+                    aria-hidden
+                  >
+                    🚴
+                  </div>
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 text-sm" aria-hidden>
+                    🏁
+                  </div>
+                </div>
+                <p className="text-[10px] text-emerald-700/70">
+                  {language === 'zh' ? '连续完成 7 天，骑到终点。' : 'Stay focused for 7 days to reach the finish.'}
+                </p>
+              </div>
+            </div>
           </div>
         </nav>
       </aside>
@@ -734,35 +971,12 @@ const AppShell: React.FC = () => {
                 <div className="space-y-4">
                   <div className={`${APP_MAIN_STICKY_BAR} flex items-center gap-3 flex-wrap`}>
                     {navToggle}
-                    <div className="flex p-1 bg-gray-100/80 rounded-xl flex-1 min-w-[min(100%,260px)] max-w-lg">
-                      <button
-                        type="button"
-                        onClick={() => setDocsListScope('user')}
-                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                          docsListScope === 'user'
-                            ? 'bg-white text-black shadow-sm'
-                            : 'text-gray-500 hover:text-gray-800'
-                        }`}
-                      >
-                        {t.docs.tabUserDocs}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDocsListScope('skill')}
-                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                          docsListScope === 'skill'
-                            ? 'bg-white text-black shadow-sm'
-                            : 'text-gray-500 hover:text-gray-800'
-                        }`}
-                      >
-                        {t.docs.tabSkillDocs}
-                      </button>
-                    </div>
                   </div>
-                  <DocumentsPanel
-                    key={activeProjectId}
+                  <AgentHomePanel
                     projectId={activeProjectId}
-                    listScope={docsListScope}
+                    todos={todos}
+                    analysisByTodoId={analysisByTodoId}
+                    sopMarkdown={sopMarkdown}
                   />
                 </div>
               )}

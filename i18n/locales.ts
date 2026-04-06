@@ -59,6 +59,7 @@ export const translations = {
       todo: 'To-Do',
       stats: 'Stats',
       docs: 'Docs',
+      agentHome: 'Agent',
       expandSidebar: 'Expand sidebar',
       collapseSidebar: 'Collapse sidebar',
     },
@@ -74,6 +75,17 @@ export const translations = {
       skillBadge: 'Skill',
       tabUserDocs: 'Uploaded',
       tabSkillDocs: 'Skill docs',
+    },
+    agentHome: {
+      refreshAiSummary: 'Refresh AI summary',
+      refreshing: 'Generating…',
+      aiSummaryFailed: 'Could not generate summary.',
+      aiQuotaHint: 'Limit reached. Subscribe or try again tomorrow.',
+      needSignIn: 'Sign in to generate an AI summary.',
+      needApiKey: 'Set VITE_MOONSHOT_API_KEY or enable proxy and sign in.',
+      lastAiUpdate: 'Last AI update',
+      quickSummaryNote: 'Rule-based overview (shown when no AI summary yet).',
+      aiGeneratedBadge: 'AI summary',
     },
     chat: {
       scopeTodo: 'Task chat',
@@ -285,8 +297,9 @@ export const translations = {
           'Task replaceability and incremental SOP summary for your workspace. Private; not for search indexing.',
       },
       appDocs: {
-        title: 'Documents · TodoAgent',
-        description: 'Workspace documents and uploads in TodoAgent. Private workspace; not indexed.',
+        title: 'Agent Home · TodoAgent',
+        description:
+          'Agent Home: memory summary, documents, and skills for your workspace. Private; not indexed.',
       },
       solutionsHub: {
         title: 'Solutions & Use Cases | TodoAgent',
@@ -370,6 +383,7 @@ export const translations = {
       todo: '待办',
       stats: '统计',
       docs: '文档',
+      agentHome: 'Agent',
       expandSidebar: '展开侧栏',
       collapseSidebar: '收起侧栏',
     },
@@ -385,6 +399,17 @@ export const translations = {
       skillBadge: 'Skill',
       tabUserDocs: '上传的文档',
       tabSkillDocs: 'Skill 文档',
+    },
+    agentHome: {
+      refreshAiSummary: '用 AI 刷新总结',
+      refreshing: '生成中…',
+      aiSummaryFailed: 'AI 总结生成失败',
+      aiQuotaHint: '今日次数受限，可订阅或次日再试。',
+      needSignIn: '请先登录后再生成 AI 总结。',
+      needApiKey: '请配置 VITE_MOONSHOT_API_KEY，或开启代理并登录。',
+      lastAiUpdate: '上次 AI 更新',
+      quickSummaryNote: '以下为规则摘要；生成 AI 总结后将替换为模型输出。',
+      aiGeneratedBadge: 'AI 总结',
     },
     chat: {
       scopeTodo: '任务专属对话',
@@ -585,8 +610,8 @@ export const translations = {
         description: '任务可替代性统计与增量 SOP 总结。私人工作区，不参与搜索引擎收录。',
       },
       appDocs: {
-        title: '文档 · TodoAgent',
-        description: '工作区文档与上传文件。私人数据，不参与搜索引擎收录。',
+        title: 'Agent 主页 · TodoAgent',
+        description: 'Agent 主页：记忆摘要、文档与 Skill。私人工作区，不参与搜索引擎收录。',
       },
       solutionsHub: {
         title: '解决方案与场景 | TodoAgent',
