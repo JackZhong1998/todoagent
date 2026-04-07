@@ -56,7 +56,19 @@ type ToastPayload = {
   subtitle: string;
 };
 
-const ACTIVITY_STORAGE_KEY = 'todoagent_daily_activity_v1';
+type TodoHistorySnapshot = {
+  title: string;
+  content: string;
+};
+
+type TodoHistoryState = {
+  snapshots: TodoHistorySnapshot[];
+  cursor: number;
+};
+
+const ACTIVITY_STORAGE_KEY_PREFIX = 'todoagent_daily_activity_v1:project:';
+
+const activityStorageKeyForProject = (projectId: string) => `${ACTIVITY_STORAGE_KEY_PREFIX}${projectId}`;
 
 const TYPING_TOAST_CANDIDATES = [
   { zh: '开工了，进入节奏。', en: 'You are in the zone.' },
@@ -119,10 +131,10 @@ const dayKeyFromTs = (ts: number) => {
   return `${y}-${m}-${day}`;
 };
 
-const loadActivityMap = (): ActivityMap => {
+const loadActivityMap = (projectId: string): ActivityMap => {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+    const raw = localStorage.getItem(activityStorageKeyForProject(projectId));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as ActivityMap;
     if (!parsed || typeof parsed !== 'object') return {};
@@ -220,8 +232,11 @@ const AppShell: React.FC = () => {
   const [sopMarkdown, setSopMarkdown] = useState(() => loadProjectSop(initialManifest.activeProjectId));
   const [sopLoading, setSopLoading] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
-  const [activityMap, setActivityMap] = useState<ActivityMap>(() => loadActivityMap());
+  const [activityMap, setActivityMap] = useState<ActivityMap>(() => loadActivityMap(initialManifest.activeProjectId));
   const [toast, setToast] = useState<ToastPayload | null>(null);
+  const [focusedTodoId, setFocusedTodoId] = useState<string | null>(null);
+  const [highlightedTodoId, setHighlightedTodoId] = useState<string | null>(null);
+  const [focusRequestByTodoId, setFocusRequestByTodoId] = useState<Record<string, number>>({});
   const useMoonshotProxy = moonshotProxyEnabled();
   const directMoonshotKey = moonshotDirectApiKey();
   const canMoonshot = useMoonshotProxy ? isLoggedIn : !!directMoonshotKey;
@@ -230,6 +245,9 @@ const AppShell: React.FC = () => {
   const sopTailRef = useRef(Promise.resolve());
   const toastTimerRef = useRef<number | null>(null);
   const typingToastShownTodoIdsRef = useRef<Record<string, boolean>>({});
+  const todoHistoriesRef = useRef<Record<string, TodoHistoryState>>({});
+  const suppressHistoryForTodoIdRef = useRef<string | null>(null);
+  const focusedTodoIdRef = useRef<string | null>(null);
 
   const showMotivationToast = useCallback(
     (kind: 'typing' | 'completed') => {
@@ -258,10 +276,18 @@ const AppShell: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(activityMap));
-    }
-  }, [activityMap]);
+    focusedTodoIdRef.current = focusedTodoId;
+  }, [focusedTodoId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(activityStorageKeyForProject(activeProjectId), JSON.stringify(activityMap));
+  }, [activityMap, activeProjectId]);
+
+  useEffect(() => {
+    setActivityMap(loadActivityMap(activeProjectId));
+    typingToastShownTodoIdsRef.current = {};
+  }, [activeProjectId]);
 
   const bumpDayActivity = useCallback((kind: 'created' | 'completed') => {
     const key = dayKeyFromTs(Date.now());
@@ -387,6 +413,61 @@ const AppShell: React.FC = () => {
     setTodos([newTodo, ...todos]);
     bumpDayActivity('created');
   };
+
+  const recordTodoSnapshot = useCallback((todo: Todo) => {
+    const snapshot: TodoHistorySnapshot = {
+      title: todo.title,
+      content: todo.content,
+    };
+    const existing = todoHistoriesRef.current[todo.id];
+    if (!existing) {
+      todoHistoriesRef.current[todo.id] = {
+        snapshots: [snapshot],
+        cursor: 0,
+      };
+      return;
+    }
+    const current = existing.snapshots[existing.cursor];
+    if (current && current.title === snapshot.title && current.content === snapshot.content) return;
+    const nextSnapshots = existing.snapshots.slice(0, existing.cursor + 1);
+    nextSnapshots.push(snapshot);
+    const MAX_HISTORY = 100;
+    const trimmed =
+      nextSnapshots.length > MAX_HISTORY ? nextSnapshots.slice(nextSnapshots.length - MAX_HISTORY) : nextSnapshots;
+    todoHistoriesRef.current[todo.id] = {
+      snapshots: trimmed,
+      cursor: trimmed.length - 1,
+    };
+  }, []);
+
+  const moveTodoHistory = useCallback(
+    (direction: 'undo' | 'redo') => {
+      const focusedId = focusedTodoIdRef.current;
+      const candidateIds = focusedId
+        ? [focusedId, ...Object.keys(todoHistoriesRef.current).filter((id) => id !== focusedId)]
+        : Object.keys(todoHistoriesRef.current);
+      const todoId = candidateIds.find((id) => {
+        const h = todoHistoriesRef.current[id];
+        if (!h) return false;
+        return direction === 'undo' ? h.cursor > 0 : h.cursor < h.snapshots.length - 1;
+      });
+      if (!todoId) return;
+      const history = todoHistoriesRef.current[todoId];
+      if (!history) return;
+      const nextCursor = direction === 'undo' ? history.cursor - 1 : history.cursor + 1;
+      const snapshot = history.snapshots[nextCursor];
+      if (!snapshot) return;
+      history.cursor = nextCursor;
+      suppressHistoryForTodoIdRef.current = todoId;
+      setTodos((prev) =>
+        prev.map((t) => (t.id === todoId ? { ...t, title: snapshot.title, content: snapshot.content } : t))
+      );
+      setFocusedTodoId(todoId);
+      setHighlightedTodoId(todoId);
+      setFocusRequestByTodoId((prev) => ({ ...prev, [todoId]: Date.now() }));
+    },
+    []
+  );
 
   const analyzeSingleCompletedTodo = async (todo: Todo) => {
     if (!canMoonshot) return;
@@ -542,6 +623,11 @@ const AppShell: React.FC = () => {
     setTodos(prev => prev.map(t => {
       if (t.id !== id) return t;
       const next = { ...t, ...updates };
+      if (suppressHistoryForTodoIdRef.current === id) {
+        suppressHistoryForTodoIdRef.current = null;
+      } else if (typeof updates.content === 'string' || typeof updates.title === 'string') {
+        recordTodoSnapshot(next);
+      }
       if (!t.isCompleted && next.isCompleted) {
         completedTodoForAnalysis = next;
         didCompleteThisTurn = true;
@@ -574,8 +660,49 @@ const AppShell: React.FC = () => {
   };
 
   const deleteTodo = (id: string) => {
+    delete todoHistoriesRef.current[id];
     setTodos(prev => prev.filter(t => t.id !== id));
+    if (focusedTodoIdRef.current === id) {
+      setFocusedTodoId(null);
+      focusedTodoIdRef.current = null;
+    }
   };
+
+  useEffect(() => {
+    todos.forEach((todo) => {
+      if (!todoHistoriesRef.current[todo.id]) {
+        todoHistoriesRef.current[todo.id] = {
+          snapshots: [{ title: todo.title, content: todo.content }],
+          cursor: 0,
+        };
+      }
+    });
+  }, [todos]);
+
+  useEffect(() => {
+    if (!highlightedTodoId) return;
+    const timer = window.setTimeout(() => setHighlightedTodoId(null), 1200);
+    return () => window.clearTimeout(timer);
+  }, [highlightedTodoId]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isMacLike = navigator.platform.toLowerCase().includes('mac');
+      const primary = isMacLike ? e.metaKey : e.ctrlKey;
+      if (!primary) return;
+      const key = e.key.toLowerCase();
+      const isUndo = key === 'z' && !e.shiftKey;
+      const isRedo = (key === 'z' && e.shiftKey) || (!isMacLike && key === 'y');
+      if (!isUndo && !isRedo) return;
+      const activeEl = document.activeElement as HTMLElement | null;
+      const inTodoEditor = !!activeEl?.closest('[data-todo-editor="1"]');
+      if (!inTodoEditor && !focusedTodoIdRef.current) return;
+      e.preventDefault();
+      moveTodoHistory(isUndo ? 'undo' : 'redo');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [moveTodoHistory]);
 
   const openGlobalChat = () => {
     setCurrentTodoForChat(undefined);
@@ -939,6 +1066,9 @@ const AppShell: React.FC = () => {
                             todo={todo}
                             onUpdate={updateTodo}
                             onDelete={deleteTodo}
+                            isHighlighted={highlightedTodoId === todo.id}
+                            focusRequestToken={focusRequestByTodoId[todo.id] ?? 0}
+                            onEditorFocus={(id) => setFocusedTodoId(id)}
                             onOpenChat={(payload) => void openTodoChat(todo, payload)}
                           />
                         </div>

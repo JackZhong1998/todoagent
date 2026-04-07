@@ -51,8 +51,11 @@ function walk(node: Node, lines: string[], listDepth: number): void {
       blockEnd();
       lines.push('---\n\n');
       return;
+    // contentEditable 里回车常产生并列 <div>，若不插换行复制纯文本会连成一行
     case 'div':
+      blockEnd();
       el.childNodes.forEach((c) => walk(c, lines, listDepth));
+      lines.push('\n');
       return;
     case 'strong':
     case 'b':

@@ -82,6 +82,40 @@ const MOONSHOT_MODEL = MOONSHOT_MODEL_DEFAULT;
 const MAX_CHAT_ATTACH_IMAGES = 4;
 const MAX_CHAT_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
 
+function extractImageDataUrlsFromHtml(html: string, limit: number): string[] {
+  if (!html || limit <= 0) return [];
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const urls: string[] = [];
+    const imgs = Array.from(doc.querySelectorAll('img'));
+    for (const img of imgs) {
+      if (urls.length >= limit) break;
+      const src = (img.getAttribute('src') || '').trim();
+      if (!src || !src.startsWith('data:image/')) continue;
+      urls.push(src);
+    }
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
+function mergeImageDataUrls(...lists: Array<string[] | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const list of lists) {
+    for (const u of list ?? []) {
+      const url = String(u || '').trim();
+      if (!url) continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+      if (out.length >= MAX_CHAT_ATTACH_IMAGES) return out;
+    }
+  }
+  return out;
+}
+
 function formatWebSearchToolPayload(data: unknown, invokeError: { message: string } | null): string {
   if (invokeError) {
     return JSON.stringify({ ok: false, error: invokeError.message });
@@ -469,15 +503,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleSendMessage = async (textOverride?: string) => {
     const rawText = (textOverride ?? inputText).trim();
-    const imageUrls = [...pendingImageDataUrls];
+    const convBefore = conversations.find((c) => c.id === currentConversationId);
+    const todoContext = initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
+    const todoImageUrls = todoContext
+      ? extractImageDataUrlsFromHtml(todoContext.content || '', MAX_CHAT_ATTACH_IMAGES)
+      : [];
+    const imageUrls = mergeImageDataUrls(pendingImageDataUrls, todoImageUrls);
     if (
       (!rawText && !imageUrls.length) ||
       !currentConversationId ||
       loadingConversationIds.includes(currentConversationId)
     )
       return;
-    const convBefore = conversations.find((c) => c.id === currentConversationId);
-    const todoContext = initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
     let todoQuote = todoContext ? buildTodoQuote(todoContext, rawText) : undefined;
     if (todoQuote) {
       const t = todoQuote.title.trim();

@@ -5,9 +5,11 @@ import { htmlToMarkdown } from '../utils/htmlToMarkdown';
 import { applyMarkdownLineTriggers, handleTodoSubtaskEnter, selectionHtmlInsideEditor } from '../utils/todoEditorMarkdown';
 import {
   fetchTodoInlineCompletion,
+  finalizeTodoInlineCompletion,
   getCaretClientRect,
   getPlainTextBeforeCaret,
   insertPlainTextAtCaret,
+  shouldRequestTodoInlineCompletion,
   stripRedundantOverlap,
 } from '../utils/todoInlineComplete';
 import { TODO_INLINE_AI_EVENT, getTodoInlineAiEnabled } from '../utils/todoInlineCompleteSettings';
@@ -28,6 +30,8 @@ interface TodoItemProps {
   onUpdate: (id: string, updates: Partial<Todo>) => void;
   onDelete: (id: string) => void;
   isHighlighted?: boolean;
+  focusRequestToken?: number;
+  onEditorFocus?: (id: string) => void;
   onOpenChat?: (payload?: {
     selectedText?: string;
     forceNewConversation?: boolean;
@@ -37,14 +41,26 @@ interface TodoItemProps {
   }) => void;
 }
 
-export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, isHighlighted = false, onOpenChat }) => {
+export const TodoItem: React.FC<TodoItemProps> = ({
+  todo,
+  onUpdate,
+  onDelete,
+  isHighlighted = false,
+  focusRequestToken = 0,
+  onEditorFocus,
+  onOpenChat,
+}) => {
   const { t } = useLanguage();
   const te = t.app.todoEditor;
-  const [currentTime, setCurrentTime] = useState(todo.totalTime);
+  // 用 startTime + totalTime 派生展示，避免重渲染/同步导致“回退重置”
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
+  const [imagePanelPos, setImagePanelPos] = useState<{ top: number; left: number } | null>(null);
+  const [imageToast, setImageToast] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<number | null>(null);
   const controlPanelRef = useRef<HTMLDivElement>(null);
+  const imageToastTimerRef = useRef<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [selectionAgentAnchor, setSelectionAgentAnchor] = useState<{ top: number; left: number; text: string } | null>(null);
   const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
@@ -62,6 +78,8 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     maxW: number;
   } | null>(null);
   const inlineGhostRef = useRef<string | null>(null);
+  /** 展示幽灵补全时对应的「从文档开头到光标」全文；光标移动后若不一致则清除，避免补全跟着跑 */
+  const inlineGhostForPrefixRef = useRef<string | null>(null);
   const inlineDebounceRef = useRef<number | null>(null);
   const inlineAbortRef = useRef<AbortController | null>(null);
 
@@ -121,6 +139,23 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
   }, [te.agentThinking, te.agentAnswered, todo.id]);
 
+  useEffect(() => {
+    if (!focusRequestToken) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus();
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    const wrapper = document.getElementById(`todo-${todo.id}`);
+    wrapper?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusRequestToken, todo.id]);
+
   // 点击编辑器外部时关闭图片控制面板
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -137,6 +172,48 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const showImageToast = useCallback((msg: string) => {
+    if (imageToastTimerRef.current) window.clearTimeout(imageToastTimerRef.current);
+    setImageToast(msg);
+    imageToastTimerRef.current = window.setTimeout(() => setImageToast(null), 1600);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (imageToastTimerRef.current) window.clearTimeout(imageToastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const host = gutterHostRef.current;
+    const img = selectedImage;
+    if (!host || !img) {
+      setImagePanelPos(null);
+      return;
+    }
+
+    const updatePos = () => {
+      const hostRect = host.getBoundingClientRect();
+      const imgRect = img.getBoundingClientRect();
+      if (!Number.isFinite(hostRect.top) || !Number.isFinite(imgRect.top)) return;
+
+      // 浮层放在图片右上角，略微上移，避免遮挡图片
+      const top = Math.max(8, imgRect.top - hostRect.top - 44);
+      const approxW = 160; // 控制面板近似宽度，用于避免越界
+      const left = Math.max(8, Math.min(hostRect.width - approxW - 8, imgRect.right - hostRect.left - approxW));
+      setImagePanelPos({ top, left });
+    };
+
+    updatePos();
+    const onWin = () => requestAnimationFrame(updatePos);
+    window.addEventListener('scroll', onWin, true);
+    window.addEventListener('resize', onWin);
+    return () => {
+      window.removeEventListener('scroll', onWin, true);
+      window.removeEventListener('resize', onWin);
+    };
+  }, [selectedImage]);
 
   useEffect(() => {
     const ed = editorRef.current;
@@ -181,24 +258,39 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     };
   }, [isEditing, todo.id]);
 
-  // 计时器逻辑
+  // 计时器 tick：仅用于触发 UI 每秒刷新；实际时间由 startTime/totalTime 计算
   useEffect(() => {
     if (todo.isRunning) {
-      timerRef.current = window.setInterval(() => {
-        setCurrentTime(prev => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      onUpdate(todo.id, { totalTime: currentTime });
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = window.setInterval(() => setNowTick(Date.now()), 1000);
+      setNowTick(Date.now());
+    } else if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [todo.isRunning, todo.id]);
+  }, [todo.isRunning]);
+
+  const currentTime =
+    todo.isRunning && todo.startTime
+      ? todo.totalTime + Math.max(0, Math.floor((nowTick - todo.startTime) / 1000))
+      : todo.totalTime;
 
   const handleToggleTimer = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onUpdate(todo.id, { isRunning: !todo.isRunning });
+    if (todo.isRunning) {
+      const startedAt = todo.startTime ?? Date.now();
+      const deltaSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      onUpdate(todo.id, {
+        isRunning: false,
+        startTime: null,
+        totalTime: todo.totalTime + deltaSeconds,
+      });
+    } else {
+      onUpdate(todo.id, { isRunning: true, startTime: Date.now() });
+    }
   };
 
   const saveContent = useCallback(() => {
@@ -234,6 +326,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     }
     inlineAbortRef.current?.abort();
     inlineAbortRef.current = null;
+    inlineGhostForPrefixRef.current = null;
     setInlineGhost(null);
     setInlineGhostPos(null);
   }, []);
@@ -268,6 +361,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       inlineDebounceRef.current = null;
       const ed = editorRef.current;
       if (!ed || document.activeElement !== ed || isComposingRef.current) return;
+      if (!shouldRequestTodoInlineCompletion(ed)) return;
 
       const prefix = getPlainTextBeforeCaret(ed);
       if (prefix === null || prefix.trim().length < 1) return;
@@ -280,12 +374,14 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
       void (async () => {
         try {
           const raw = await fetchTodoInlineCompletion(sentPrefix, { apiKey, signal: ac.signal });
-          const merged = stripRedundantOverlap(sentPrefix, raw);
+          const merged = finalizeTodoInlineCompletion(stripRedundantOverlap(sentPrefix, raw));
           if (!merged) return;
           const ed2 = editorRef.current;
           if (!ed2 || document.activeElement !== ed2 || isComposingRef.current) return;
+          if (!shouldRequestTodoInlineCompletion(ed2)) return;
           const nowPrefix = getPlainTextBeforeCaret(ed2);
           if (nowPrefix !== sentPrefix) return;
+          inlineGhostForPrefixRef.current = sentPrefix;
           setInlineGhost(merged);
         } catch (err) {
           if ((err as Error).name === 'AbortError') return;
@@ -313,6 +409,11 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         return;
       }
       if (inlineGhostRef.current) {
+        const caretPrefix = getPlainTextBeforeCaret(ed);
+        if (caretPrefix !== inlineGhostForPrefixRef.current) {
+          clearInlineSuggestion();
+          return;
+        }
         requestAnimationFrame(() => repositionInlineGhost());
       }
     };
@@ -362,6 +463,15 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
           e.preventDefault();
         }
       }
+
+      // 对文本粘贴：强制使用纯文本插入，避免外部样式导致不换行/超出编辑器宽度
+      if (!e.defaultPrevented) {
+        const text = e.clipboardData.getData('text/plain');
+        if (text) {
+          e.preventDefault();
+          insertPlainTextAtCaret(text);
+        }
+      }
     },
     [insertImageFromFile]
   );
@@ -385,16 +495,190 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
     const partial = selectionHtmlInsideEditor(ed);
     if (partial !== null) {
       const md = htmlToMarkdown(partial);
+      try {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = partial;
+        const img = tmp.querySelector('img');
+        const src = img?.getAttribute('src') || '';
+        if (src) {
+          const hasText = (tmp.textContent ?? '').replace(/\s+/g, '').length > 0;
+          if (hasText) {
+            // 图文混合：plain 文本仅保留真实文字，避免出现 ![...](data:...) 大串内容
+            const plainText = (tmp.textContent ?? '')
+              .replace(/\u00a0/g, ' ')
+              .replace(/[ \t]+\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            e.clipboardData.setData('text/plain', plainText);
+            e.clipboardData.setData('text/html', partial);
+            e.preventDefault();
+            return;
+          }
+
+          // 选区含图片时：不要在 text/plain 里放任何内容（否则飞书可能优先粘贴为文本/base64）
+          e.clipboardData.setData('text/plain', '');
+          e.clipboardData.setData('text/html', partial);
+          e.preventDefault();
+
+          const dataUrlToBlob = (dataUrl: string): Blob | null => {
+            const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+            if (!m) return null;
+            const mime = m[1];
+            const b64 = m[2];
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new Blob([bytes], { type: mime });
+          };
+
+          const writeImage = async () => {
+            let blob: Blob | null = null;
+            if (src.startsWith('data:')) {
+              blob = dataUrlToBlob(src);
+            } else {
+              try {
+                const res = await fetch(src);
+                blob = await res.blob();
+              } catch {
+                blob = null;
+              }
+            }
+            if (!blob) return;
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore - ClipboardItem 可能未包含在当前 ts lib 配置里
+            const item = new ClipboardItem({
+              // 飞书桌面端很多时候更偏好读取 text/html 来粘贴富内容
+              'text/html': new Blob([partial], { type: 'text/html' }),
+              // 保持为空，避免被当作 base64 文本优先粘贴
+              'text/plain': new Blob([''], { type: 'text/plain' }),
+              [blob.type || 'image/png']: blob,
+            });
+            try {
+              await navigator.clipboard.write([item]);
+            } catch {
+              // ignore
+            }
+          };
+
+          void writeImage();
+          return;
+        }
+      } catch {
+        // ignore
+      }
       e.clipboardData.setData('text/plain', md);
       e.clipboardData.setData('text/html', partial);
       e.preventDefault();
       return;
     }
-    const md = htmlToMarkdown(ed.innerHTML);
-    e.clipboardData.setData('text/plain', md);
-    e.clipboardData.setData('text/html', ed.innerHTML);
+    const html = ed.innerHTML;
+    const md = htmlToMarkdown(html);
+    // 整体复制时也清理 data-url 图片 markdown，避免外部应用粘贴成大串文本
+    const plain = md
+      .replace(/!\[[^\]]*]\s*\((?:data:[^)]+|[^)]*)\)/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    e.clipboardData.setData('text/plain', plain);
+    e.clipboardData.setData('text/html', html);
     e.preventDefault();
   }, []);
+
+  const copySelectedImage = useCallback(async () => {
+    const img = selectedImage;
+    if (!img) return;
+    const src = img.getAttribute('src') || '';
+    if (!src) return;
+
+    const dataUrlToBlob = (dataUrl: string): Blob | null => {
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) return null;
+      const mime = m[1];
+      const b64 = m[2];
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    };
+
+    let blob: Blob | null = null;
+    if (src.startsWith('data:')) {
+      blob = dataUrlToBlob(src);
+    } else {
+      try {
+        const res = await fetch(src);
+        blob = await res.blob();
+      } catch {
+        blob = null;
+      }
+    }
+    if (!blob) return;
+
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore - ClipboardItem 可能未包含在当前 ts lib 配置里
+    const item = new ClipboardItem({
+      'text/html': new Blob([`<img src="${src}" />`], { type: 'text/html' }),
+      'text/plain': new Blob([''], { type: 'text/plain' }),
+      [blob.type || 'image/png']: blob,
+    });
+    try {
+      await navigator.clipboard.write([item]);
+      showImageToast('复制成功');
+    } catch {
+      showImageToast('复制失败，可用下载');
+    }
+  }, [selectedImage, showImageToast]);
+
+  const downloadSelectedImage = useCallback(async () => {
+    const img = selectedImage;
+    if (!img) return;
+    const src = img.getAttribute('src') || '';
+    if (!src) return;
+
+    const dataUrlToBlob = (dataUrl: string): Blob | null => {
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) return null;
+      const mime = m[1];
+      const b64 = m[2];
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    };
+
+    let blob: Blob | null = null;
+    let ext = 'png';
+    if (src.startsWith('data:')) {
+      blob = dataUrlToBlob(src);
+      const mime = blob?.type || '';
+      if (mime.includes('jpeg')) ext = 'jpg';
+      else if (mime.includes('webp')) ext = 'webp';
+      else if (mime.includes('gif')) ext = 'gif';
+      else if (mime.includes('png')) ext = 'png';
+    } else {
+      try {
+        const res = await fetch(src);
+        blob = await res.blob();
+        const mime = blob.type || '';
+        if (mime.includes('jpeg')) ext = 'jpg';
+        else if (mime.includes('webp')) ext = 'webp';
+        else if (mime.includes('gif')) ext = 'gif';
+        else if (mime.includes('png')) ext = 'png';
+      } catch {
+        blob = null;
+      }
+    }
+    if (!blob) return;
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `todo-image.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showImageToast('已开始下载');
+  }, [selectedImage, showImageToast]);
 
   const handleCut = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
     const ed = editorRef.current;
@@ -620,7 +904,10 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             onCopy={handleCopy}
             onCut={handleCut}
             onClick={handleEditorClick}
-            onFocus={() => setIsEditing(true)}
+            onFocus={() => {
+              setIsEditing(true);
+              onEditorFocus?.(todo.id);
+            }}
             onBlur={() => {
               setIsEditing(false);
               setSelectionAgentAnchor(null);
@@ -629,6 +916,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             }}
             className={`
               w-full outline-none text-[15px] leading-7 font-normal text-[#37352f] select-text
+              whitespace-pre-wrap break-words [overflow-wrap:anywhere]
               [&>h1:first-child]:pr-28
               
               [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-black [&_h1]:mt-0 [&_h1]:mb-4 [&_h1]:leading-tight
@@ -684,6 +972,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
             [&_.todo-agent-card[data-agent-state='answered']]:after:content-['']
           `}
           data-placeholder="新任务"
+          data-todo-editor="1"
           spellCheck={false}
         />
 
@@ -701,11 +990,37 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
         ) : null}
         
         {/* Image Control Panel */}
-        {selectedImage && (
+        {selectedImage && imagePanelPos ? (
           <div 
             ref={controlPanelRef}
-            className="absolute top-[-40px] right-0 bg-white rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-gray-100 p-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200"
+            className="absolute bg-white rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-gray-100 p-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200"
+            style={{ top: imagePanelPos.top, left: imagePanelPos.left }}
           >
+            <button
+              onClick={() => {
+                void copySelectedImage();
+              }}
+              className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              title="复制"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                void downloadSelectedImage();
+              }}
+              className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              title="下载"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="M7 10l5 5 5-5" />
+                <path d="M12 15V3" />
+              </svg>
+            </button>
             <button
               onClick={() => resizeImage(0.9)}
               className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
@@ -737,7 +1052,16 @@ export const TodoItem: React.FC<TodoItemProps> = ({ todo, onUpdate, onDelete, is
               <Trash2 size={16} />
             </button>
           </div>
-        )}
+        ) : null}
+
+        {imageToast && imagePanelPos ? (
+          <div
+            className="pointer-events-none absolute z-50 rounded-md bg-black/75 px-2 py-1 text-[12px] leading-none text-white shadow-sm"
+            style={{ top: imagePanelPos.top + 44, left: imagePanelPos.left }}
+          >
+            {imageToast}
+          </div>
+        ) : null}
       </div>
       </div>
 
