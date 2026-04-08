@@ -159,6 +159,33 @@ function makeList(ordered: boolean, content: string): HTMLElement {
   return list;
 }
 
+function listStartNumber(ol: HTMLOListElement): number {
+  const raw = Number(ol.getAttribute('start') || '1');
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
+}
+
+function getPreviousOrderedListLastNumber(editor: HTMLElement, currentList: HTMLOListElement): number | null {
+  const orderedLists = Array.from(editor.querySelectorAll('ol')) as HTMLOListElement[];
+  const idx = orderedLists.indexOf(currentList);
+  if (idx <= 0) return null;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const prev = orderedLists[i];
+    const lis = prev.querySelectorAll(':scope > li');
+    if (!lis.length) continue;
+    return listStartNumber(prev) + lis.length - 1;
+  }
+  return null;
+}
+
+function maybeContinueOrderedList(editor: HTMLElement, list: HTMLElement) {
+  if (list.tagName !== 'OL') return;
+  const ol = list as HTMLOListElement;
+  const prevLast = getPreviousOrderedListLastNumber(editor, ol);
+  if (prevLast !== null) {
+    ol.setAttribute('start', String(prevLast + 1));
+  }
+}
+
 function insertCodeBlock(): HTMLElement {
   const pre = document.createElement('pre');
   const code = document.createElement('code');
@@ -233,6 +260,12 @@ function applyFullLine(range: Range, m: FullMatch): boolean {
       return false;
   }
   range.insertNode(inserted);
+  if (inserted.nodeType === Node.ELEMENT_NODE) {
+    const root = (inserted as HTMLElement).closest('[data-todo-editor="1"]') as HTMLElement | null;
+    if (root && (inserted as HTMLElement).tagName === 'OL') {
+      maybeContinueOrderedList(root, inserted as HTMLElement);
+    }
+  }
   collapseCaretAfter(inserted);
   return true;
 }
@@ -346,6 +379,38 @@ export function handleTodoSubtaskEnter(editor: HTMLElement): boolean {
     sel.addRange(r);
   }
   return true;
+}
+
+/** 在空子任务行按 Backspace：删除当前行并把光标并到上一行，避免需要多次删除。 */
+export function handleTodoSubtaskBackspace(editor: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !sel.isCollapsed || !sel.focusNode || !editor.contains(sel.focusNode)) return false;
+
+  const todoLine = findTodoSubtaskParagraph(editor, sel.focusNode);
+  if (!todoLine) return false;
+  const contentSpan = todoLine.querySelector('.todo-md-content') as HTMLElement | null;
+  if (!contentSpan) return false;
+
+  const content = (contentSpan.textContent || '').replace(/\u00A0/g, '').trim();
+  if (content.length > 0) return false;
+
+  const prev = todoLine.previousElementSibling as HTMLElement | null;
+  if (!prev) return false;
+
+  todoLine.remove();
+
+  const target = (prev.querySelector('.todo-md-content') as HTMLElement | null) || prev;
+  const r = document.createRange();
+  r.selectNodeContents(target);
+  r.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return true;
+}
+
+export function getPreviousOrderedListNextStart(editor: HTMLElement, currentList: HTMLOListElement): number | null {
+  const prevLast = getPreviousOrderedListLastNumber(editor, currentList);
+  return prevLast === null ? null : prevLast + 1;
 }
 
 export function applyMarkdownLineTriggers(editor: HTMLElement): boolean {

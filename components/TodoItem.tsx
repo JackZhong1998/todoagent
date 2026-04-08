@@ -2,7 +2,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, Trash2, CheckCircle, Circle, CalendarClock, Bot } from 'lucide-react';
 import { htmlToMarkdown } from '../utils/htmlToMarkdown';
-import { applyMarkdownLineTriggers, handleTodoSubtaskEnter, selectionHtmlInsideEditor } from '../utils/todoEditorMarkdown';
+import {
+  applyMarkdownLineTriggers,
+  getPreviousOrderedListNextStart,
+  handleTodoSubtaskBackspace,
+  handleTodoSubtaskEnter,
+  selectionHtmlInsideEditor,
+} from '../utils/todoEditorMarkdown';
 import {
   fetchTodoInlineCompletion,
   finalizeTodoInlineCompletion,
@@ -71,6 +77,9 @@ export const TodoItem: React.FC<TodoItemProps> = ({
   const [isDeadlineOpen, setIsDeadlineOpen] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [deadlineTime, setDeadlineTime] = useState<string>('');
+  const [orderListMenu, setOrderListMenu] = useState<{ top: number; left: number } | null>(null);
+  const orderListTargetRef = useRef<HTMLOListElement | null>(null);
+  const orderListMenuRef = useRef<HTMLDivElement>(null);
   const gutterHostRef = useRef<HTMLDivElement>(null);
   const isComposingRef = useRef(false);
   const initRef = useRef(false);
@@ -323,6 +332,18 @@ export const TodoItem: React.FC<TodoItemProps> = ({
       ed.removeEventListener('keyup', updateSelectionAgentAnchor);
     };
   }, [isEditing, todo.id]);
+
+  useEffect(() => {
+    const onDocDown = (event: MouseEvent) => {
+      if (!orderListMenu) return;
+      const target = event.target as Node;
+      if (orderListMenuRef.current?.contains(target)) return;
+      setOrderListMenu(null);
+      orderListTargetRef.current = null;
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [orderListMenu]);
 
   // 计时器 tick：仅用于触发 UI 每秒刷新；实际时间由 startTime/totalTime 计算
   useEffect(() => {
@@ -793,6 +814,14 @@ export const TodoItem: React.FC<TodoItemProps> = ({
         return;
       }
     }
+    if (e.key === 'Backspace' && !isComposingRef.current) {
+      const ed = editorRef.current;
+      if (ed && handleTodoSubtaskBackspace(ed)) {
+        e.preventDefault();
+        saveContent();
+        return;
+      }
+    }
     if (e.key === 'Enter') {
       const selection = window.getSelection();
       const anchorNode = selection?.anchorNode;
@@ -828,6 +857,27 @@ export const TodoItem: React.FC<TodoItemProps> = ({
 
   const handleEditorClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
+    const li = target.closest('li');
+    if (li && li.parentElement?.tagName === 'OL') {
+      const liRect = li.getBoundingClientRect();
+      const markerHit = e.clientX <= liRect.left + 14;
+      if (markerHit) {
+        e.preventDefault();
+        e.stopPropagation();
+        const hostRect = gutterHostRef.current?.getBoundingClientRect();
+        const ol = li.parentElement as HTMLOListElement;
+        orderListTargetRef.current = ol;
+        if (hostRect) {
+          setOrderListMenu({
+            top: Math.max(8, liRect.top - hostRect.top - 6),
+            left: Math.max(8, liRect.left - hostRect.left + 12),
+          });
+        } else {
+          setOrderListMenu({ top: 8, left: 8 });
+        }
+        return;
+      }
+    }
     const agentDot =
       (target.closest(`.${TODO_AGENT_STATUS_TEXT_CLASS}`) as HTMLElement | null) ||
       (target.closest(`.${TODO_AGENT_CARD_CLASS}`) as HTMLElement | null);
@@ -855,6 +905,23 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     if (target.tagName === 'IMG') {
       setSelectedImage(target as HTMLImageElement);
     }
+  };
+
+  const applyOrderedListFollow = (restart: boolean) => {
+    const ed = editorRef.current;
+    const ol = orderListTargetRef.current;
+    if (!ed || !ol) return;
+    if (restart) {
+      ol.removeAttribute('start');
+    } else {
+      const next = getPreviousOrderedListNextStart(ed, ol);
+      if (next && next > 1) {
+        ol.setAttribute('start', String(next));
+      }
+    }
+    setOrderListMenu(null);
+    orderListTargetRef.current = null;
+    saveContent();
   };
 
   const deleteImage = () => {
@@ -895,7 +962,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
       `}
     >
       {/* Combined Controls and Editor */}
-      <div className="flex items-start gap-4 mb-2 relative">
+      <div className="flex items-start gap-2 mb-2 relative">
         <button 
           onClick={toggleComplete}
           className="mt-1 text-gray-300 hover:text-blue-500 transition-colors flex-shrink-0 select-none"
@@ -1053,6 +1120,31 @@ export const TodoItem: React.FC<TodoItemProps> = ({
             }}
           >
             {inlineGhost}
+          </div>
+        ) : null}
+
+        {orderListMenu ? (
+          <div
+            ref={orderListMenuRef}
+            className="absolute z-50 rounded-lg border border-gray-200 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.12)] p-1 min-w-[140px]"
+            style={{ top: orderListMenu.top, left: orderListMenu.left }}
+          >
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyOrderedListFollow(false)}
+            >
+              跟随前面
+            </button>
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyOrderedListFollow(true)}
+            >
+              重新开始
+            </button>
           </div>
         ) : null}
         
