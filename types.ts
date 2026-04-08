@@ -33,6 +33,12 @@ export interface Message {
     title: string;
     firstLine: string;
   };
+  /** Referenced project docs attached for this user turn. */
+  referencedDocs?: Array<{
+    id: string;
+    name: string;
+    fixed?: boolean;
+  }>;
   timestamp: number;
 }
 
@@ -59,4 +65,6 @@ export interface WorkspaceDoc {
   sourceUrl?: string;
   /** Skill instructions: shown in docs list and injectable into chat. */
   isSkill?: boolean;
+  /** Immutable project background document (always included in agent context). */
+  isProjectBackground?: boolean;
 }

@@ -9,14 +9,17 @@ import {
   loadProjectAnalysis,
   loadProjectConversations,
   loadProjectDocs,
+  loadProjectFocusMap,
   loadProjectSop,
   loadProjectTodos,
   saveManifest,
   saveProjectAnalysis,
   saveProjectConversations,
   saveProjectDocs,
+  saveProjectFocusMap,
   saveProjectSop,
   saveProjectTodos,
+  type ProjectFocusMap,
   type ProjectMeta,
 } from '../utils/projectStorage';
 
@@ -33,6 +36,8 @@ type SyncParams = {
   setAnalysisByTodoId: Dispatch<SetStateAction<Record<string, AnalysisResultItem>>>;
   sopMarkdown: string;
   setSopMarkdown: Dispatch<SetStateAction<string>>;
+  focusMap: ProjectFocusMap;
+  setFocusMap: Dispatch<SetStateAction<ProjectFocusMap>>;
 };
 
 export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: () => void } {
@@ -55,11 +60,13 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
   const todosRef = useRef(params.todos);
   const analysisRef = useRef(params.analysisByTodoId);
   const sopRef = useRef(params.sopMarkdown);
+  const focusMapRef = useRef(params.focusMap);
   projectsRef.current = params.projects;
   activeRef.current = params.activeProjectId;
   todosRef.current = params.todos;
   analysisRef.current = params.analysisByTodoId;
   sopRef.current = params.sopMarkdown;
+  focusMapRef.current = params.focusMap;
 
   const runPush = useCallback(() => {
     if (!client || !userId) return;
@@ -74,6 +81,7 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
         docs: loadProjectDocs(pid),
         conversations: loadProjectConversations(pid),
         sopMarkdown: isActive ? sopRef.current : loadProjectSop(pid),
+        focusMap: isActive ? focusMapRef.current : loadProjectFocusMap(pid),
       };
     }).catch((e) => console.error('[Supabase] push failed', e));
   }, [client, userId]);
@@ -117,6 +125,7 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
               docs: loadProjectDocs(pid),
               conversations: loadProjectConversations(pid),
               sopMarkdown: loadProjectSop(pid),
+              focusMap: loadProjectFocusMap(pid),
             }));
           }
         } else {
@@ -128,6 +137,7 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
             saveProjectDocs(p.id, pack.docs);
             saveProjectConversations(p.id, pack.conversations);
             saveProjectSop(p.id, pack.sopMarkdown ?? '');
+            saveProjectFocusMap(p.id, pack.focusMap ?? {});
           }
           saveManifest({ projects, activeProjectId });
           if (cancelled) return;
@@ -136,6 +146,7 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
           params.setTodos(byProjectId.get(activeProjectId)?.todos ?? []);
           params.setAnalysisByTodoId(byProjectId.get(activeProjectId)?.analysis ?? {});
           params.setSopMarkdown(loadProjectSop(activeProjectId));
+          params.setFocusMap(loadProjectFocusMap(activeProjectId));
         }
       } catch (e) {
         console.error('[Supabase] hydrate failed', e);
@@ -162,6 +173,7 @@ export function useWorkspaceSupabaseSync(params: SyncParams): { bumpRemotePush: 
     params.todos,
     params.analysisByTodoId,
     params.sopMarkdown,
+    params.focusMap,
     schedulePush,
   ]);
 

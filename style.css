@@ -105,3 +105,13 @@ body {
     border-bottom: 4px solid transparent;
     background-clip: padding-box;
 }
+
+@keyframes focus-dashed-orbit {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.focus-dashed-orbit {
+    animation: focus-dashed-orbit 12s linear infinite;
+}

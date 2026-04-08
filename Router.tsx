@@ -58,6 +58,7 @@ const AppRouter: React.FC = () => {
         <Route path="/app/todo" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
         <Route path="/app/stats" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
         <Route path="/app/docs" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
+        <Route path="/app/focus" element={<ProtectedAppRoute><AppShell /></ProtectedAppRoute>} />
         <Route path="/app/analysis" element={<Navigate to="/app/stats" replace />} />
         <Route path="/solutions" element={<SolutionsHubPage />} />
         <Route path="/solutions/:slug" element={<SolutionsDetailPage />} />

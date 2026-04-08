@@ -27,10 +27,14 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface TodoItemProps {
   todo: Todo;
-  onUpdate: (id: string, updates: Partial<Todo>) => void;
+  onUpdate: (id: string, updates: Partial<Todo>, meta?: { caretOffset?: number | null }) => void;
   onDelete: (id: string) => void;
   isHighlighted?: boolean;
   focusRequestToken?: number;
+  historyApplyRequest?: {
+    token: number;
+    caretOffset: number | null;
+  };
   onEditorFocus?: (id: string) => void;
   onOpenChat?: (payload?: {
     selectedText?: string;
@@ -47,6 +51,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
   onDelete,
   isHighlighted = false,
   focusRequestToken = 0,
+  historyApplyRequest,
   onEditorFocus,
   onOpenChat,
 }) => {
@@ -82,6 +87,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
   const inlineGhostForPrefixRef = useRef<string | null>(null);
   const inlineDebounceRef = useRef<number | null>(null);
   const inlineAbortRef = useRef<AbortController | null>(null);
+  const lastHistoryApplyTokenRef = useRef<number>(0);
 
   useEffect(() => {
     inlineGhostRef.current = inlineGhost;
@@ -139,22 +145,82 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     }
   }, [te.agentThinking, te.agentAnswered, todo.id]);
 
+  const getCaretTextOffset = useCallback((root: HTMLElement): number | null => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.endContainer)) return null;
+    const pre = range.cloneRange();
+    pre.selectNodeContents(root);
+    pre.setEnd(range.endContainer, range.endOffset);
+    return pre.toString().length;
+  }, []);
+
+  const setCaretByTextOffset = useCallback((root: HTMLElement, offset: number | null) => {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    range.collapse(false);
+    if (offset == null || offset < 0) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let consumed = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const len = node.textContent?.length ?? 0;
+      if (consumed + len >= offset) {
+        range.setStart(node, Math.max(0, offset - consumed));
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return;
+      }
+      consumed += len;
+      node = walker.nextNode();
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  const scrollCurrentCaretIntoView = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(true);
+    const marker = document.createElement('span');
+    marker.setAttribute('data-caret-marker', '1');
+    marker.style.cssText = 'display:inline-block;width:0;height:1em;vertical-align:baseline;';
+    range.insertNode(marker);
+    marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    marker.remove();
+  }, []);
+
   useEffect(() => {
     if (!focusRequestToken) return;
     const ed = editorRef.current;
     if (!ed) return;
     ed.focus();
-    const selection = window.getSelection();
-    if (selection) {
-      const range = document.createRange();
-      range.selectNodeContents(ed);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-    const wrapper = document.getElementById(`todo-${todo.id}`);
-    wrapper?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setCaretByTextOffset(ed, null);
   }, [focusRequestToken, todo.id]);
+
+  useEffect(() => {
+    const token = historyApplyRequest?.token ?? 0;
+    if (!token || token === lastHistoryApplyTokenRef.current) return;
+    lastHistoryApplyTokenRef.current = token;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const nextHtml = todo.content || (todo.title ? `<h1>${todo.title}</h1>` : '<h1><br></h1>');
+    if (ed.innerHTML !== nextHtml) {
+      ed.innerHTML = nextHtml;
+    }
+    ed.focus();
+    setCaretByTextOffset(ed, historyApplyRequest?.caretOffset ?? null);
+    requestAnimationFrame(() => scrollCurrentCaretIntoView());
+  }, [historyApplyRequest?.token, setCaretByTextOffset, scrollCurrentCaretIntoView]);
 
   // 点击编辑器外部时关闭图片控制面板
   useEffect(() => {
@@ -293,7 +359,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     }
   };
 
-  const saveContent = useCallback(() => {
+  const saveContent = useCallback((caretOffset?: number | null) => {
     if (editorRef.current) {
       const newContent = editorRef.current.innerHTML;
       
@@ -314,7 +380,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
         // If content is completely empty, we might want to keep the title?
         // But if user deleted everything, maybe title should be empty too?
         // Let's stick to the extracted title.
-        onUpdate(todo.id, { content: newContent, title: newTitle });
+        onUpdate(todo.id, { content: newContent, title: newTitle }, { caretOffset: caretOffset ?? null });
       }
     }
   }, [todo.id, todo.content, todo.title, onUpdate]);
@@ -745,7 +811,8 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     if (!ed || isComposingRef.current) return;
     clearInlineSuggestion();
     applyMarkdownLineTriggers(ed);
-    saveContent();
+    const caretOffset = getCaretTextOffset(ed);
+    saveContent(caretOffset);
     scheduleInlineComplete();
   };
 
@@ -755,7 +822,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     if (!ed) return;
     clearInlineSuggestion();
     applyMarkdownLineTriggers(ed);
-    saveContent();
+    saveContent(getCaretTextOffset(ed));
     scheduleInlineComplete();
   };
 

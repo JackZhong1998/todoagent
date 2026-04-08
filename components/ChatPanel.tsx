@@ -1,9 +1,10 @@
 
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
-import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight, Copy, Check, ImagePlus, Search } from 'lucide-react';
+import { X, MessageSquare, History, Plus, Send, Loader2, ChevronRight, Copy, Check, ImagePlus, Search, Paperclip, Upload, FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import mammoth from 'mammoth';
 import type { WorkspaceDoc } from '../types';
 import { Conversation, Message, Todo } from '../types';
 import { translations } from '../i18n/locales';
@@ -34,8 +35,10 @@ import {
 import { createClerkSupabaseClient, isSupabaseConfigured } from '../utils/supabase/client';
 import {
   loadProjectConversations,
+  loadProjectDocPromptRefs,
   loadProjectDocs,
   notifyProjectDocsUpdated,
+  PROJECT_DOCS_UPDATED_EVENT,
   saveProjectConversations,
   saveProjectDocs,
 } from '../utils/projectStorage';
@@ -72,6 +75,8 @@ interface ChatPanelProps {
   ) => void;
   /** 服务端返回今日免费额度用尽时（打开付费引导） */
   onAgentQuotaExceeded?: () => void;
+  /** 发送消息前检查是否允许发送（用于付费墙卡点） */
+  beforeSendMessage?: () => Promise<boolean>;
 }
 
 const KIMI_SYSTEM_PROMPT = "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。";
@@ -81,6 +86,28 @@ const MOONSHOT_MODEL = MOONSHOT_MODEL_DEFAULT;
 
 const MAX_CHAT_ATTACH_IMAGES = 4;
 const MAX_CHAT_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_DOC_INJECT_CHARS = 100_000;
+
+async function fileToDoc(file: File): Promise<WorkspaceDoc> {
+  const id = generateId();
+  const createdAt = Date.now();
+  const lower = file.name.toLowerCase();
+
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
+    const body = await file.text();
+    return { id, name: file.name, kind: 'markdown', body, createdAt };
+  }
+  if (lower.endsWith('.txt')) {
+    const body = await file.text();
+    return { id, name: file.name, kind: 'text', body, createdAt };
+  }
+  if (lower.endsWith('.docx')) {
+    const buf = await file.arrayBuffer();
+    const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });
+    return { id, name: file.name, kind: 'html', body: value || '<p></p>', createdAt };
+  }
+  throw new Error('UNSUPPORTED');
+}
 
 function extractImageDataUrlsFromHtml(html: string, limit: number): string[] {
   if (!html || limit <= 0) return [];
@@ -167,6 +194,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onTodoAgentCardResolved,
   onTodoAgentCardStatusChange,
   onAgentQuotaExceeded,
+  beforeSendMessage,
 }) => {
   const { t, language } = useLanguage();
   const { isLoggedIn, getClerkToken } = useAuth();
@@ -180,8 +208,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [inputText, setInputText] = useState('');
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [pendingImageDataUrls, setPendingImageDataUrls] = useState<string[]>([]);
+  const [allDocs, setAllDocs] = useState<WorkspaceDoc[]>(() => loadProjectDocs(projectId));
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [pendingReferencedDocIds, setPendingReferencedDocIds] = useState<string[]>([]);
+  const [chatDocUploadError, setChatDocUploadError] = useState<string | null>(null);
+  const [includeTodoContext, setIncludeTodoContext] = useState<boolean>(!!initialTodo);
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
+  const chatDocInputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     const el = inputTextareaRef.current;
@@ -220,6 +254,46 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const globalConversations = conversations.filter(c => !c.todoId);
   const todoConversations = conversations.filter(c => c.todoId);
+  const projectBackgroundDoc = useMemo(
+    () => allDocs.find((d) => d.isProjectBackground),
+    [allDocs]
+  );
+  const globalPromptDocIds = useMemo(() => loadProjectDocPromptRefs(projectId), [projectId, allDocs.length]);
+  const fixedPromptDocIds = useMemo(
+    () => (projectBackgroundDoc?.id ? [projectBackgroundDoc.id] : []),
+    [projectBackgroundDoc?.id]
+  );
+  const selectableDocs = useMemo(
+    () => allDocs.filter((d) => !d.isSkill),
+    [allDocs]
+  );
+
+  useEffect(() => {
+    setAllDocs(loadProjectDocs(projectId));
+    setPendingReferencedDocIds([]);
+    setIncludeTodoContext(!!initialTodo);
+  }, [projectId, initialTodo?.id]);
+
+  useEffect(() => {
+    const onDocsUpdated = (e: Event) => {
+      const pid = (e as CustomEvent<{ projectId: string }>).detail?.projectId;
+      if (pid !== projectId) return;
+      setAllDocs(loadProjectDocs(projectId));
+    };
+    window.addEventListener(PROJECT_DOCS_UPDATED_EVENT, onDocsUpdated);
+    return () => window.removeEventListener(PROJECT_DOCS_UPDATED_EVENT, onDocsUpdated);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!fixedPromptDocIds.length) return;
+    setPendingReferencedDocIds((prev) => {
+      const next = [...prev];
+      for (const id of fixedPromptDocIds) {
+        if (!next.includes(id)) next.push(id);
+      }
+      return next;
+    });
+  }, [fixedPromptDocIds.join('|')]);
   const getTodoInputText = (todo: Todo) => {
     const plainContent = stripHtmlTags(todo.content || '').trim();
     return plainContent || todo.title || '';
@@ -401,11 +475,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     (includeToolInstructions: boolean, skillDocIds: string[], webSearch: boolean) => {
       let s = `${KIMI_SYSTEM_PROMPT}\n\n${SYSTEM_PROMPT}`;
       s += agentPersonalityPromptAddon(projectId, language === 'zh' ? 'zh' : 'en');
+      const promptDocIds = Array.from(new Set([...fixedPromptDocIds, ...globalPromptDocIds]));
+      const promptDocs = promptDocIds
+        .map((id) => allDocs.find((d) => d.id === id))
+        .filter((d): d is WorkspaceDoc => !!d);
+      if (promptDocs.length) {
+        const raw = promptDocs
+          .map((d) => `### ${d.name}\n${stripHtmlTags(d.body).trim() || d.body}`)
+          .join('\n\n---\n\n');
+        const text =
+          raw.length > MAX_DOC_INJECT_CHARS
+            ? `${raw.slice(0, MAX_DOC_INJECT_CHARS)}\n\n[文档上下文已截断]`
+            : raw;
+        s += `\n\n## 项目参考文档（默认上下文）\n${text}`;
+      }
       if (includeToolInstructions) s += `\n\n${buildAgentToolsSystemPrompt({ webSearch })}`;
       s += buildSkillInjectionBlock(projectId, skillDocIds);
       return s;
     },
-      [projectId, language]
+      [projectId, language, fixedPromptDocIds.join('|'), globalPromptDocIds.join('|'), allDocs]
   );
 
   const callKimiAPIPlain = async (
@@ -502,9 +590,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, []);
 
   const handleSendMessage = async (textOverride?: string) => {
+    if (beforeSendMessage) {
+      const ok = await beforeSendMessage();
+      if (!ok) return;
+    }
     const rawText = (textOverride ?? inputText).trim();
     const convBefore = conversations.find((c) => c.id === currentConversationId);
-    const todoContext = initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
+    const todoContext = includeTodoContext && initialTodo && convBefore?.todoId === initialTodo.id ? initialTodo : undefined;
     const todoImageUrls = todoContext
       ? extractImageDataUrlsFromHtml(todoContext.content || '', MAX_CHAT_ATTACH_IMAGES)
       : [];
@@ -525,7 +617,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       }
     }
     const userLine = rawText || (imageUrls.length ? ct.userBubbleImageLabel : '');
-    const apiContent = todoContext ? `${userLine}\n${buildTodoContextPrompt(todoContext)}` : userLine;
+    const referenceDocs = pendingReferencedDocIds
+      .map((id) => allDocs.find((d) => d.id === id))
+      .filter((d): d is WorkspaceDoc => !!d && !d.isSkill);
+    const docBlock = referenceDocs.length
+      ? [
+          '',
+          '---',
+          'Reference Documents For This Turn:',
+          ...referenceDocs.map((d) => `### ${d.name}\n${stripHtmlTags(d.body).trim() || d.body}`),
+          '---',
+        ].join('\n')
+      : '';
+    const apiContent = `${userLine}${todoContext ? `\n${buildTodoContextPrompt(todoContext)}` : ''}${docBlock ? `\n${docBlock}` : ''}`;
 
     const userMessage: Message = {
       id: generateId(),
@@ -534,6 +638,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       apiContent,
       imageDataUrls: imageUrls.length ? imageUrls : undefined,
       todoQuote,
+      referencedDocs: referenceDocs.map((d) => ({
+        id: d.id,
+        name: d.name,
+        fixed: !!d.isProjectBackground,
+      })),
       timestamp: Date.now()
     };
 
@@ -545,6 +654,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     addMessageToConversation(convId, userMessage);
     setInputText('');
     setPendingImageDataUrls([]);
+    setPendingReferencedDocIds((prev) => prev.filter((id) => fixedPromptDocIds.includes(id)));
+    setIncludeTodoContext(!!initialTodo);
     setLoadingConversationIds((prev) => (prev.includes(convId) ? prev : [...prev, convId]));
     if (todoIdForCard && onTodoAgentCardStatusChange) {
       onTodoAgentCardStatusChange(todoIdForCard, convId, 'loading');
@@ -717,6 +828,42 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       finishAgentCard();
     }
   };
+
+  const handlePickDocs = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    e.target.value = '';
+    setChatDocUploadError(null);
+    void (async () => {
+      const additions: WorkspaceDoc[] = [];
+      for (const file of Array.from(files)) {
+        try {
+          additions.push(await fileToDoc(file));
+        } catch (err) {
+          setChatDocUploadError(
+            err instanceof Error && err.message === 'UNSUPPORTED' ? t.docs.unsupportedFormat : t.docs.parseError
+          );
+        }
+      }
+      if (!additions.length) return;
+      const existing = loadProjectDocs(projectId);
+      const next = [...additions, ...existing];
+      saveProjectDocs(projectId, next);
+      const fresh = loadProjectDocs(projectId);
+      notifyProjectDocsUpdated(projectId);
+      bumpRemoteSync();
+      setAllDocs(fresh);
+      setPendingReferencedDocIds((prev) => {
+        const ids = additions.map(
+          (a) =>
+            fresh.find((f) => f.id === a.id)?.id ??
+            fresh.find((f) => !f.isSkill && f.name.trim() === a.name.trim())?.id ??
+            a.id
+        );
+        return Array.from(new Set([...prev, ...ids]));
+      });
+    })();
+  }, [projectId, bumpRemoteSync]);
 
   useEffect(() => {
     if (!isOpen || !launchPayload?.autoSend || !launchPayload.text) return;
@@ -967,6 +1114,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                         </div>
                       ) : null}
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                      {message.referencedDocs?.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {message.referencedDocs.map((doc) => (
+                            <span key={doc.id} className="inline-flex items-center gap-1 rounded-md bg-white/20 border border-white/25 px-2 py-0.5 text-[11px]">
+                              <FileText size={11} />
+                              {doc.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       {message.todoQuote ? (
                         <div className="mt-2 border-l-2 border-white/60 pl-2 text-[11px] leading-snug text-white/90">
                           <div className="font-semibold truncate">{message.todoQuote.title}</div>
@@ -995,6 +1152,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       </div>
 
       <div className="p-4 border-t border-gray-100 bg-white flex-shrink-0">
+        {(pendingReferencedDocIds.length > 0 || (initialTodo && includeTodoContext)) ? (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {initialTodo && includeTodoContext ? (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                <span className="max-w-[220px] truncate">{ct.todoContextLabel}: {stripHtmlTags(initialTodo.content || '').split(/\r?\n/).find(Boolean) || initialTodo.title || t.app.noTitle}</span>
+                <button type="button" className="text-gray-500 hover:text-black" onClick={() => setIncludeTodoContext(false)}>×</button>
+              </div>
+            ) : null}
+            {pendingReferencedDocIds.map((id) => {
+              const doc = allDocs.find((d) => d.id === id);
+              if (!doc) return null;
+              const fixed = !!doc.isProjectBackground;
+              return (
+                <div key={id} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                  <FileText size={12} />
+                  <span className="max-w-[220px] truncate">{doc.name}</span>
+                  {!fixed ? (
+                    <button
+                      type="button"
+                      className="text-gray-500 hover:text-black"
+                      onClick={() => setPendingReferencedDocIds((prev) => prev.filter((x) => x !== id))}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         {pendingImageDataUrls.length > 0 ? (
           <div className="flex flex-wrap gap-2 mb-2">
             {pendingImageDataUrls.map((src, idx) => (
@@ -1057,6 +1244,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           />
           <button
             type="button"
+            className="p-2 rounded-lg transition-colors text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+            title={ct.attachDocTooltip}
+            aria-label={ct.attachDocTooltip}
+            onClick={() => setShowDocPicker(true)}
+          >
+            <Paperclip size={18} />
+          </button>
+          <button
+            type="button"
             className={`p-2 rounded-lg transition-colors text-gray-400 hover:text-gray-700 hover:bg-gray-100 ${
               pendingImageDataUrls.length >= MAX_CHAT_ATTACH_IMAGES ? 'opacity-40 cursor-not-allowed' : ''
             }`}
@@ -1099,6 +1295,65 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           <p className="text-[11px] text-amber-800/90 mt-2 leading-snug">{ct.agentToolsHint}</p>
         ) : null}
       </div>
+      {showDocPicker ? (
+        <div className="absolute inset-0 z-40 bg-black/30 flex items-end md:items-center justify-center p-3">
+          <div className="w-full max-w-xl max-h-[75vh] overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-2xl">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">{ct.docPickerTitle}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{ct.docPickerHint}</p>
+              </div>
+              <button type="button" className="p-2 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100" onClick={() => setShowDocPicker(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-3 border-b border-gray-100">
+              <input
+                ref={chatDocInputRef}
+                type="file"
+                accept=".md,.markdown,.txt,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                multiple
+                className="hidden"
+                onChange={handlePickDocs}
+              />
+              <button
+                type="button"
+                onClick={() => chatDocInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Upload size={14} />
+                {t.docs.uploadLocal}
+              </button>
+              {chatDocUploadError ? <p className="text-xs text-rose-600 mt-2">{chatDocUploadError}</p> : null}
+            </div>
+            <div className="max-h-[52vh] overflow-y-auto p-3 space-y-1.5">
+              {selectableDocs.length ? selectableDocs.map((doc) => {
+                const fixed = !!doc.isProjectBackground;
+                const checked = pendingReferencedDocIds.includes(doc.id) || fixed;
+                return (
+                  <label key={doc.id} className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2.5 hover:bg-gray-50">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={15} className="text-gray-400 shrink-0" />
+                      <span className="text-sm text-gray-800 truncate">{doc.name}</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={fixed}
+                      onChange={(e) => {
+                        if (fixed) return;
+                        setPendingReferencedDocIds((prev) => e.target.checked ? Array.from(new Set([...prev, doc.id])) : prev.filter((x) => x !== doc.id));
+                      }}
+                    />
+                  </label>
+                );
+              }) : (
+                <p className="text-sm text-gray-400 text-center py-8">{ct.docPickerEmpty}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AnalysisResultItem } from '../../components/AIAnalysisPage';
 import type { Conversation, Todo, WorkspaceDoc } from '../../types';
-import type { ProjectMeta } from '../projectStorage';
+import type { ProjectFocusMap, ProjectMeta } from '../projectStorage';
 
 export type RemotePullResult =
   | { kind: 'empty' }
@@ -17,6 +17,7 @@ export type RemotePullResult =
           docs: WorkspaceDoc[];
           conversations: Conversation[];
           sopMarkdown: string;
+          focusMap: ProjectFocusMap;
         }
       >;
     };
@@ -79,7 +80,7 @@ export async function pullWorkspace(client: SupabaseClient, userId: string): Pro
 
   const { data: dataRows, error: dErr } = await client
     .from('todoagent_project_data')
-    .select('project_id, todos, analysis, docs, conversations, sop_markdown')
+    .select('project_id, todos, analysis, docs, conversations, sop_markdown, focus_map')
     .eq('user_id', userId);
 
   if (dErr) throw dErr;
@@ -122,6 +123,7 @@ export async function pullWorkspace(client: SupabaseClient, userId: string): Pro
       docs: WorkspaceDoc[];
       conversations: Conversation[];
       sopMarkdown: string;
+      focusMap: ProjectFocusMap;
     }
   >();
 
@@ -132,6 +134,7 @@ export async function pullWorkspace(client: SupabaseClient, userId: string): Pro
       docs: [],
       conversations: [],
       sopMarkdown: '',
+      focusMap: {},
     });
   }
 
@@ -141,12 +144,14 @@ export async function pullWorkspace(client: SupabaseClient, userId: string): Pro
     const fromTable = docsByProject.get(pid) ?? [];
     const legacyDocs = asDocArray(row.docs);
     const sopRaw = (row as { sop_markdown?: string }).sop_markdown;
+    const focusRaw = (row as { focus_map?: ProjectFocusMap }).focus_map;
     byProjectId.set(pid, {
       todos: asTodoArray(row.todos),
       analysis: asAnalysisMap(row.analysis),
       docs: fromTable.length > 0 ? fromTable : legacyDocs,
       conversations: asConversationArray(row.conversations),
       sopMarkdown: typeof sopRaw === 'string' ? sopRaw : '',
+      focusMap: focusRaw && typeof focusRaw === 'object' ? focusRaw : {},
     });
   }
 
@@ -164,6 +169,7 @@ export async function pushWorkspace(
     docs: WorkspaceDoc[];
     conversations: Conversation[];
     sopMarkdown: string;
+    focusMap: ProjectFocusMap;
   }
 ): Promise<void> {
   if (!projects.length) return;
@@ -192,6 +198,7 @@ export async function pushWorkspace(
       docs: payload.docs,
       conversations: payload.conversations,
       sop_markdown: payload.sopMarkdown ?? '',
+      focus_map: payload.focusMap ?? {},
       updated_at: now,
     };
   });

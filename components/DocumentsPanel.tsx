@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import mammoth from 'mammoth';
-import { FileText, Trash2, Upload } from 'lucide-react';
+import { FileText, Info, Trash2, Upload } from 'lucide-react';
 import type { WorkspaceDoc } from '../types';
 import { generateId } from '../utils';
 import {
+  loadProjectDocPromptRefs,
   loadProjectDocs,
   PROJECT_DOCS_UPDATED_EVENT,
+  saveProjectDocPromptRefs,
   saveProjectDocs,
 } from '../utils/projectStorage';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -50,12 +50,16 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
   const bumpRemoteSync = useWorkspaceSyncBump();
   const d = t.docs;
   const [docs, setDocs] = useState<WorkspaceDoc[]>(() => loadProjectDocs(projectId));
+  const [promptDocIds, setPromptDocIds] = useState<string[]>(() => loadProjectDocPromptRefs(projectId));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [bodyDraft, setBodyDraft] = useState('');
+  const [savedTip, setSavedTip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDocs(loadProjectDocs(projectId));
+    setPromptDocIds(loadProjectDocPromptRefs(projectId));
   }, [projectId]);
 
   useEffect(() => {
@@ -64,18 +68,28 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
   }, [docs, projectId, bumpRemoteSync]);
 
   useEffect(() => {
+    saveProjectDocPromptRefs(projectId, promptDocIds);
+  }, [projectId, promptDocIds]);
+
+  useEffect(() => {
     const onExternalDocs = (e: Event) => {
       const pid = (e as CustomEvent<{ projectId: string }>).detail?.projectId;
       if (pid !== projectId) return;
       setDocs(loadProjectDocs(projectId));
+      setPromptDocIds(loadProjectDocPromptRefs(projectId));
     };
     window.addEventListener(PROJECT_DOCS_UPDATED_EVENT, onExternalDocs);
     return () => window.removeEventListener(PROJECT_DOCS_UPDATED_EVENT, onExternalDocs);
   }, [projectId]);
 
+  useEffect(() => {
+    if (!savedTip) return;
+    const timer = window.setTimeout(() => setSavedTip(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [savedTip]);
+
   const visibleDocs = useMemo(
-    () =>
-      listScope === 'skill' ? docs.filter((x) => x.isSkill) : docs.filter((x) => !x.isSkill),
+    () => (listScope === 'skill' ? docs.filter((x) => x.isSkill) : docs.filter((x) => !x.isSkill)),
     [docs, listScope]
   );
 
@@ -83,6 +97,11 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
     () => (selectedId ? visibleDocs.find((x) => x.id === selectedId) : undefined),
     [visibleDocs, selectedId]
   );
+
+  useEffect(() => {
+    setBodyDraft(selected?.body ?? '');
+    setSavedTip(false);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (visibleDocs.length === 0) {
@@ -112,17 +131,56 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
         }
       }
       if (next.length) {
-        setDocs((prev) => [...next, ...prev]);
-        setSelectedId(next[0].id);
+        setDocs((prev) => {
+          const merged = [...next, ...prev];
+          saveProjectDocs(projectId, merged);
+          return loadProjectDocs(projectId);
+        });
+        setSelectedId(() => {
+          const fresh = loadProjectDocs(projectId);
+          return (
+            fresh.find((doc) => doc.id === next[0].id)?.id ??
+            fresh.find((doc) => doc.isProjectBackground)?.id ??
+            fresh[0]?.id ??
+            null
+          );
+        });
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
-    [d.parseError, d.unsupportedFormat]
+    [d.parseError, d.unsupportedFormat, projectId]
   );
 
   const removeDoc = (id: string) => {
-    setDocs((prev) => prev.filter((x) => x.id !== id));
+    setDocs((prev) => {
+      const merged = prev.filter((x) => x.id !== id);
+      saveProjectDocs(projectId, merged);
+      return loadProjectDocs(projectId);
+    });
+    setPromptDocIds((prev) => prev.filter((x) => x !== id));
   };
+
+  const togglePromptInject = (id: string, checked: boolean) => {
+    if (checked) {
+      setPromptDocIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      return;
+    }
+    setPromptDocIds((prev) => prev.filter((x) => x !== id));
+  };
+
+  const saveDraft = () => {
+    if (!selected) return;
+    setDocs((prev) => {
+      const merged = prev.map((doc) => (doc.id === selected.id ? { ...doc, body: bodyDraft } : doc));
+      saveProjectDocs(projectId, merged);
+      return loadProjectDocs(projectId);
+    });
+    setSavedTip(true);
+  };
+
+  const embedChecked = !!(selected && (selected.isProjectBackground || promptDocIds.includes(selected.id)));
+  const embedDisabled = !!selected?.isProjectBackground;
+  const embedTooltip = selected?.isProjectBackground ? d.embedAgentTooltipFixed : d.embedAgentTooltip;
 
   return (
     <div className="flex h-[min(70vh,640px)] border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
@@ -172,33 +230,95 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
                   <FileText size={16} className="text-gray-400 shrink-0 mt-0.5" />
                   <span className="text-sm font-medium text-gray-800 truncate min-w-0">{doc.name}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => removeDoc(doc.id)}
-                  className="shrink-0 p-2 text-gray-300 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title={d.delete}
-                >
-                  <Trash2 size={16} />
-                </button>
+                {doc.isProjectBackground ? null : (
+                  <button
+                    type="button"
+                    onClick={() => removeDoc(doc.id)}
+                    className="shrink-0 p-2 text-gray-300 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title={d.delete}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
             ))
           )}
         </div>
       </div>
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain p-6 md:p-8">
+
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-white">
         {!selected ? (
-          <div className="min-h-full flex items-center justify-center text-gray-400 text-sm">{d.previewEmpty}</div>
-        ) : selected.kind === 'markdown' ? (
-          <article className="prose prose-sm prose-gray max-w-none prose-headings:font-semibold prose-a:text-blue-600">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body}</ReactMarkdown>
-          </article>
-        ) : selected.kind === 'text' ? (
-          <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">{selected.body}</pre>
+          <div className="min-h-full flex items-center justify-center text-gray-400 text-sm px-6">{d.previewEmpty}</div>
         ) : (
-          <div
-            className="docx-preview text-sm text-gray-800 leading-relaxed space-y-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:p-2 [&_th]:border [&_th]:border-gray-200 [&_th]:p-2 [&_th]:bg-gray-50"
-            dangerouslySetInnerHTML={{ __html: selected.body }}
-          />
+          <>
+            <div className="relative z-20 shrink-0 overflow-visible border-b border-gray-100 bg-white px-4 md:px-6 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
+                  <span className="text-sm font-semibold text-gray-900 truncate max-w-[min(100%,320px)]" title={selected.name}>
+                    {selected.name}
+                  </span>
+                  {selected.isProjectBackground ? (
+                    <span className="text-[11px] font-medium text-gray-500 whitespace-nowrap">({d.embedFixedShort})</span>
+                  ) : null}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs text-gray-600 whitespace-nowrap">{d.embedAgentLabel}</span>
+                    <div className="relative z-[60] group/info">
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-gray-400 outline-none hover:bg-gray-100 hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-300"
+                        aria-label={embedTooltip}
+                      >
+                        <Info size={15} strokeWidth={2} />
+                      </button>
+                      {/* 向下展开：避免根节点 overflow-hidden + 向上定位被裁切 */}
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none absolute left-1/2 top-full z-[70] mt-1.5 w-[min(288px,calc(100vw-120px))] -translate-x-1/2 rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-[11px] leading-snug text-gray-700 shadow-lg opacity-0 transition-opacity invisible group-hover/info:opacity-100 group-hover/info:visible group-focus-within/info:opacity-100 group-focus-within/info:visible"
+                      >
+                        {embedTooltip}
+                      </div>
+                    </div>
+                    <label className={`inline-flex items-center ${embedDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                        checked={embedChecked}
+                        disabled={embedDisabled}
+                        onChange={(e) => {
+                          if (embedDisabled) return;
+                          togglePromptInject(selected.id, e.target.checked);
+                        }}
+                      />
+                      <span
+                        className="relative h-6 w-11 shrink-0 rounded-full bg-gray-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform after:content-[''] peer-checked:bg-black peer-checked:after:translate-x-5 peer-disabled:opacity-60"
+                        aria-hidden
+                      />
+                    </label>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={saveDraft}
+                  className="shrink-0 rounded-lg bg-black px-4 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 transition-colors"
+                >
+                  {d.saveDoc}
+                </button>
+              </div>
+              {savedTip ? <p className="mt-2 text-xs text-emerald-600">{d.saved}</p> : null}
+            </div>
+
+            <div className="relative z-0 flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 md:px-6 md:py-5">
+              {selected.kind === 'html' ? (
+                <p className="mb-2 text-[11px] text-gray-400">{d.docEditorHtmlHint}</p>
+              ) : null}
+              <textarea
+                value={bodyDraft}
+                onChange={(e) => setBodyDraft(e.target.value)}
+                className="h-[min(52vh,480px)] min-h-[200px] w-full resize-y rounded-xl border border-gray-200 p-3 font-mono text-sm leading-relaxed text-gray-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                spellCheck={false}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
