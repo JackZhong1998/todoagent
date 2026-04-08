@@ -79,6 +79,28 @@ export const stripHtmlTags = (html: string): string => {
   return temp.textContent || temp.innerText || '';
 };
 
+/**
+ * Todo 卡片编辑器以首个 h1 为标题区；innerText/stripHtmlTags 常把 h1 与紧跟的正文接成一行，
+ * 对话栏等场景应优先使用 h1 的纯文本，避免标题与正文拼接。
+ */
+export const getTodoHeadingPlainText = (contentHtml: string, fallbackTitle: string): string => {
+  const html = (contentHtml || '').trim();
+  if (html) {
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    const h1 = host.querySelector('h1');
+    const h1Text = (h1?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (h1Text) return h1Text;
+  }
+  const plain = stripHtmlTags(html).trim();
+  const firstLine = plain
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (firstLine) return firstLine;
+  return (fallbackTitle || '').trim();
+};
+
 export const SYSTEM_PROMPT = `你是一个专业的 To-Do 任务助手，专门帮助用户完成各种任务。
 
 你的核心职责：

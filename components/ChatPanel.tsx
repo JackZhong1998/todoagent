@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWorkspaceSyncBump } from '../contexts/WorkspaceSyncContext';
 import {
   generateId,
+  getTodoHeadingPlainText,
   skillDocumentNameFromUrl,
   stripHtmlTags,
   SYSTEM_PROMPT,
@@ -302,14 +303,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const plainContent = stripHtmlTags(todo.content || '').trim();
     return plainContent || todo.title || '';
   };
-  const getTodoFirstLine = useCallback((todo: Todo) => {
-    const plainContent = stripHtmlTags(todo.content || '').trim();
-    const firstLine = plainContent
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean);
-    return firstLine || todo.title || t.app.noTitle;
-  }, [t.app.noTitle]);
+  const getTodoFirstLine = useCallback(
+    (todo: Todo) => getTodoHeadingPlainText(todo.content || '', todo.title || '') || t.app.noTitle,
+    [t.app.noTitle]
+  );
 
   const currentHeaderTitle = useMemo(() => {
     if (initialTodo && currentConversation?.todoId === initialTodo.id) {
@@ -1185,7 +1182,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             })}
             {initialTodo && includeTodoContext ? (
               <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
-                <span className="max-w-[220px] truncate">{ct.todoContextLabel}: {stripHtmlTags(initialTodo.content || '').split(/\r?\n/).find(Boolean) || initialTodo.title || t.app.noTitle}</span>
+                <span className="max-w-[220px] truncate">{ct.todoContextLabel}: {getTodoFirstLine(initialTodo)}</span>
                 <button type="button" className="text-gray-500 hover:text-black" onClick={() => setIncludeTodoContext(false)}>×</button>
               </div>
             ) : null}

@@ -384,17 +384,18 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     if (editorRef.current) {
       const newContent = editorRef.current.innerHTML;
       
-      // Extract title from content logic
-      let newTitle = '无标题';
+      // 与侧栏标题一致：优先取首个 h1（避免 h1 与正文在 innerText 里无换行时被拼成一行）
+      let newTitle = '';
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = newContent;
-      const textContent = tempDiv.innerText || tempDiv.textContent || '';
-      const firstLine = textContent.split('\n').find(line => line.trim() !== '');
-      if (firstLine) {
-        newTitle = firstLine.trim().substring(0, 50);
+      const h1 = tempDiv.querySelector('h1');
+      const h1Text = (h1?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (h1Text) {
+        newTitle = h1Text.substring(0, 50);
       } else {
-        // Fallback to empty title if content is empty
-        newTitle = '';
+        const textContent = tempDiv.innerText || tempDiv.textContent || '';
+        const firstLine = textContent.split('\n').find((line) => line.trim() !== '');
+        newTitle = firstLine ? firstLine.trim().substring(0, 50) : '';
       }
 
       if (newContent !== todo.content) {
