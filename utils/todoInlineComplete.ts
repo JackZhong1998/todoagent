@@ -4,13 +4,13 @@ const MOONSHOT_URL = 'https://api.moonshot.cn/v1/chat/completions';
 export const DEFAULT_INLINE_MODEL = 'kimi-k2-turbo-preview';
 
 const SYSTEM_PROMPT = `You are a tiny inline phrase suggester for the user's personal task note (plain text / Markdown-style outline).
-Output ONLY the next few characters that fit immediately after the cursor — enough to nudge the user forward, NOT to finish the whole sentence or line.
+Output ONLY a very short continuation that fits immediately after the cursor.
 Rules:
-- Output at most 10 characters (same script as the note; count letters/CJK chars, no long runs).
+- Output strictly 2-5 characters (same script as the note; count letters/CJK chars).
 - No quotes, no markdown fences, no labels like "Completion:".
 - Do not repeat any suffix of the given context.
 - Match the user's language (Chinese if the note is Chinese, etc.).
-- Prefer a natural phrase tail (e.g. 的下一步、；以便) rather than a full stop or newline unless the prefix clearly ends a list marker.`;
+- Prefer a natural phrase tail (e.g. 的下一步、；以便), not a full sentence.`;
 
 export function getPlainTextBeforeCaret(editor: HTMLElement): string | null {
   const sel = window.getSelection();
@@ -49,12 +49,24 @@ export function getPlainTextAfterCaret(editor: HTMLElement): string | null {
  * 送入模型的仍是：从文档开头到光标的全文 `prefix`（system + user 消息）；未另传标题或其它字段。
  */
 export function shouldRequestTodoInlineCompletion(editor: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  const caret = sel.getRangeAt(0);
+  if (!editor.contains(caret.commonAncestorContainer)) return false;
+
+  // 必须是编辑器绝对末尾，避免在句中/段中出现幽灵续写遮挡内容。
+  const end = document.createRange();
+  end.selectNodeContents(editor);
+  end.collapse(false);
+  if (caret.compareBoundaryPoints(Range.START_TO_START, end) !== 0) return false;
+
   const after = getPlainTextAfterCaret(editor);
   if (after === null) return false;
   return after.trim().length === 0;
 }
 
-const MAX_COMPLETION_GRAPHEMES = 10;
+const MIN_COMPLETION_GRAPHEMES = 2;
+const MAX_COMPLETION_GRAPHEMES = 5;
 
 function limitCompletionGraphemes(text: string, max: number): string {
   const t = text.trim();
@@ -78,7 +90,11 @@ function limitCompletionGraphemes(text: string, max: number): string {
 export function finalizeTodoInlineCompletion(completion: string): string {
   let s = limitCompletionGraphemes(completion, MAX_COMPLETION_GRAPHEMES);
   s = s.replace(/[。！？.!?]+$/g, '');
-  return s.trim();
+  s = s.trim();
+  if (!s) return '';
+  const len = [...s].length;
+  if (len < MIN_COMPLETION_GRAPHEMES) return '';
+  return s;
 }
 
 export function getCaretClientRect(editor: HTMLElement): DOMRect | null {

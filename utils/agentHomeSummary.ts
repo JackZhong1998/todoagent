@@ -12,108 +12,166 @@ export type AgentHomeAiSnapshot = {
 
 export type AgentHomePersonalityLite = 'coach' | 'strategist' | 'executor';
 
-/** System prompt：仅输出 JSON，供 Agent Home「AI 总结」一次调用使用。 */
-export const AGENT_HOME_SUMMARY_SYSTEM_PROMPT = `${KIMI_SYSTEM_BASE}
+export type AgentSummaryDimension = 'preferencesAndNeeds' | 'userUnderstanding' | 'projectUnderstanding';
 
-你是 TodoAgent 工作区里的「记忆整理员」。用户会给你当前项目的结构化材料（待办统计、对话摘录、文档与 Skill 列表、SOP 片段等）。请据此生成供产品界面展示的短摘要。
+export const AGENT_HOME_INCREMENTAL_SYSTEM_PROMPT = `${KIMI_SYSTEM_BASE}
 
-你必须严格遵守：
-1) 只根据输入材料下结论；材料里没有的信息不要编造（包括用户的职业、公司、具体隐私）。
-2) 若材料不足，用 1～2 条简短说明「尚不足以推断」，不要臆测。
-3) 输出必须是**仅包含 JSON 对象**的正文，不要用 markdown 代码块，不要前后缀解释文字。
-4) 数组每一项是一句完整中文或英文句子（与 uiLanguage 一致），尽量短（每条建议不超过 80 个字或英文 120 字符）。
-5) 根据 agentPersonality 调整语气侧重（不要重复 personality 这个词）：
-   - coach：多给节奏与坚持方面的中性观察；
-   - strategist：多给结构、风险与权衡；
-   - executor：多给可执行重点与下一步倾向。
-6) 三段内容不要重复同一句话；preferencesAndNeeds 侧重沟通风格、协作习惯、需求模式，不要复述纯数字统计（数字放在 projectUnderstanding 更合适）。
+你是 TodoAgent 的「长期用户认知引擎」。你的任务不是做一次性摘要，而是持续积累并修正对用户的认识。
 
-JSON 形状（键名固定）：
+目标：
+- 每次只处理一个维度（preferencesAndNeeds / userUnderstanding / projectUnderstanding）。
+- 结合“已有认知 + 本次新增材料”，产出可累积、可复用、可长期维护的增量认知条目。
+- 输出要偏“稳定特征”和“可执行洞察”，不是流水账。
+
+硬性规则：
+1) 只使用输入材料，不得编造。不要推断用户职业、公司、隐私身份等未给信息。
+2) 若证据不足，允许输出 1-2 条“证据不足”类条目，但不要空泛。
+3) 输出必须是纯 JSON 对象，不要 markdown，不要解释前后缀。
+4) 每条是一句完整句子，语言跟 uiLanguage 保持一致，尽量简洁（中文 <= 80 字，英文 <= 120 chars）。
+5) 内容应该“可累计”：优先保留长期有效的认识；短期一次性细节应降权。
+6) 可以修正已有认知：若新证据与旧认知冲突，应更新为更可靠表达。
+7) 根据 agentPersonality 调整表达重点：
+   - coach：更强调节奏、动机、坚持方式；
+   - strategist：更强调结构、风险、权衡与决策习惯；
+   - executor：更强调执行偏好、动作顺序、推进方式。
+8) 当前只处理一个 targetDimension，严禁输出其它维度内容。
+
+输出 JSON 形状（键名固定）：
 {
-  "userUnderstanding": string[],
-  "projectUnderstanding": string[],
-  "preferencesAndNeeds": string[]
+  "items": string[]
 }
 
-每段数组长度 3～6 条。`;
+items 长度 4-10。`;
 
-export function buildAgentHomeSummaryUserPrompt(input: {
+export const AGENT_HOME_MERGE_SYSTEM_PROMPT = `${KIMI_SYSTEM_BASE}
+
+你是 TodoAgent 的「认知合并器」。你会收到某个维度的当前认知条目与本次新增条目。
+你的任务是合并成更高质量、更长期可用的一组认知。
+
+合并准则：
+1) 去重：语义重复的条目只保留表达更清晰的一条。
+2) 提纯：删除空话、模板话、无证据的猜测。
+3) 纠偏：如果新条目能修正旧条目，保留修正后的版本。
+4) 累积：保留长期有效认知，避免只反映一次性临时状态。
+5) 可执行：尽量让条目能指导后续协作与交互策略。
+6) 只按 targetDimension 输出，不混入其它维度内容。
+7) 输出必须是纯 JSON 对象，不要 markdown，不要前后缀解释。
+
+输出 JSON 形状（键名固定）：
+{
+  "items": string[]
+}
+
+items 长度 6-16。`;
+
+export function buildAgentHomeIncrementalPrompt(input: {
   uiLanguage: 'zh' | 'en';
   agentPersonality: AgentHomePersonalityLite;
-  todos: { total: number; completed: number; open: number; recentCompletedTitles: string[] };
-  sopExcerpt: string;
+  trigger: 'auto' | 'manual';
+  targetDimension: AgentSummaryDimension;
+  currentItems: string[];
+  todo: { id: string; title: string; content: string } | null;
   conversationSnippets: string[];
-  userDocNames: string[];
-  skillDocNames: string[];
 }): string {
-  const snips = input.conversationSnippets.slice(-24).join('\n---\n');
-  const recents = input.todos.recentCompletedTitles.slice(0, 8).join(' | ');
-  const sop = input.sopExcerpt.trim().slice(0, 6000);
-  const docs = input.userDocNames.slice(0, 40).join(', ');
-  const skills = input.skillDocNames.slice(0, 40).join(', ');
+  const snips = input.conversationSnippets.slice(-36).join('\n---\n');
+  const todoBlock = input.todo
+    ? JSON.stringify(
+        {
+          id: input.todo.id,
+          title: input.todo.title || '(empty)',
+          content: input.todo.content.slice(0, 12000) || '(empty)',
+        },
+        null,
+        2
+      )
+    : '(none)';
 
   return [
     `uiLanguage: ${input.uiLanguage}`,
     `agentPersonality: ${input.agentPersonality}`,
+    `trigger: ${input.trigger}`,
+    `targetDimension: ${input.targetDimension}`,
     '',
-    '## Todos (counts)',
-    JSON.stringify({
-      total: input.todos.total,
-      completed: input.todos.completed,
-      open: input.todos.open,
-      recentCompletedTitles: recents || '(none)',
-    }),
+    '## Current stored items for this dimension',
+    JSON.stringify(input.currentItems.slice(0, 24), null, 2),
     '',
-    '## User-uploaded document names',
-    docs || '(none)',
+    '## Current todo (only this todo should be considered as task context)',
+    todoBlock,
     '',
-    '## Skill document names',
-    skills || '(none)',
-    '',
-    '## SOP excerpt (may be empty)',
-    sop || '(empty)',
-    '',
-    '## Recent conversation snippets (user + assistant, chronological chunks)',
+    '## Conversation snippets related to this summarization',
     snips || '(empty)',
     '',
-    'Remember: output JSON only, with keys userUnderstanding, projectUnderstanding, preferencesAndNeeds.',
+    'Return JSON only: {"items": string[]}.',
   ].join('\n');
 }
 
-export function parseAgentHomeSummaryJson(raw: string): Omit<AgentHomeAiSnapshot, 'generatedAt'> | null {
+export function buildAgentHomeMergePrompt(input: {
+  uiLanguage: 'zh' | 'en';
+  targetDimension: AgentSummaryDimension;
+  currentItems: string[];
+  incomingItems: string[];
+}): string {
+  return [
+    `uiLanguage: ${input.uiLanguage}`,
+    `targetDimension: ${input.targetDimension}`,
+    '',
+    '## Existing items',
+    JSON.stringify(input.currentItems.slice(0, 36), null, 2),
+    '',
+    '## Incoming items',
+    JSON.stringify(input.incomingItems.slice(0, 24), null, 2),
+    '',
+    'Return JSON only: {"items": string[]}.',
+  ].join('\n');
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
   const tryParse = (s: string) => {
     try {
-      const o = JSON.parse(s) as Record<string, unknown>;
-      const user = o.userUnderstanding;
-      const proj = o.projectUnderstanding;
-      const pref = o.preferencesAndNeeds;
-      const asArr = (v: unknown): string[] =>
-        Array.isArray(v)
-          ? v.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 8)
-          : [];
-      const u = asArr(user);
-      const p = asArr(proj);
-      const n = asArr(pref);
-      if (!u.length && !p.length && !n.length) return null;
-      return { userUnderstanding: u, projectUnderstanding: p, preferencesAndNeeds: n };
+      return JSON.parse(s) as Record<string, unknown>;
     } catch {
       return null;
     }
   };
 
   const direct = tryParse(raw.trim());
-  if (direct) return direct;
+  if (direct) return direct as Record<string, unknown>;
 
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fence?.[1]) {
     const v = tryParse(fence[1].trim());
-    if (v) return v;
+    if (v) return v as Record<string, unknown>;
   }
 
   const brace = raw.match(/\{[\s\S]*\}/);
-  if (brace) return tryParse(brace[0]);
+  if (brace) return tryParse(brace[0]) as Record<string, unknown> | null;
 
   return null;
+}
+
+const asStringArray = (v: unknown, limit: number): string[] =>
+  Array.isArray(v)
+    ? v
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean)
+        .slice(0, limit)
+    : [];
+
+export function parseAgentHomeItemsJson(raw: string): string[] | null {
+  const o = parseJsonObject(raw);
+  if (!o) return null;
+  const items = asStringArray(o.items, 24);
+  return items.length ? items : [];
+}
+
+export function parseAgentHomeSummaryJson(raw: string): Omit<AgentHomeAiSnapshot, 'generatedAt'> | null {
+  const o = parseJsonObject(raw);
+  if (!o) return null;
+  const u = asStringArray(o.userUnderstanding, 24);
+  const p = asStringArray(o.projectUnderstanding, 24);
+  const n = asStringArray(o.preferencesAndNeeds, 24);
+  if (!u.length && !p.length && !n.length) return null;
+  return { userUnderstanding: u, projectUnderstanding: p, preferencesAndNeeds: n };
 }
 
 export const AGENT_HOME_SUMMARY_MODEL = MOONSHOT_MODEL_DEFAULT;

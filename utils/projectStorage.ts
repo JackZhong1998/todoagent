@@ -106,7 +106,7 @@ export function saveProjectDocs(projectId: string, docs: WorkspaceDoc[]): void {
 
 const PROJECT_BACKGROUND_DOC_NAME = '项目背景.md';
 const PROJECT_BACKGROUND_DOC_NAME_EN = 'project background.md';
-const PROJECT_BACKGROUND_DOC_FALLBACK_BODY = `# 项目背景
+const PROJECT_BACKGROUND_DOC_FALLBACK_BODY_LEGACY = `# 项目背景
 
 请在这里维护项目背景信息。该文档会作为固定参考嵌入到每次 Agent 对话中。
 
@@ -115,6 +115,27 @@ const PROJECT_BACKGROUND_DOC_FALLBACK_BODY = `# 项目背景
 - 关键约束
 - 术语说明
 - 当前里程碑`;
+
+const PROJECT_BACKGROUND_DOC_FALLBACK_BODY = `# 项目背景 / Project Background
+
+> 该文档会固定嵌入到每次 Agent 对话上下文中。  
+> This document is always injected into every Agent conversation context.
+
+## 中文（必填）
+
+请在这里维护项目背景信息，建议包含：
+- 项目目标
+- 关键约束
+- 术语说明
+- 当前里程碑
+
+## English (Required)
+
+Maintain the project background here. Recommended content:
+- Project goals
+- Key constraints
+- Glossary / terms
+- Current milestones`;
 
 /** Stable id so sync/ensure never spawns duplicate background rows. */
 export function projectBackgroundStableDocId(projectId: string): string {
@@ -203,9 +224,23 @@ export function ensureProjectBackgroundDoc(projectId: string, docs: WorkspaceDoc
   const idx = list.findIndex((d) => d.id === stable);
   if (idx !== -1) {
     const cur = list[idx];
-    if (cur.name === PROJECT_BACKGROUND_DOC_NAME && cur.isProjectBackground) return list;
+    const normalizedBody = String(cur.body || '').trim();
+    const shouldUpgradeLegacyBody =
+      normalizedBody === PROJECT_BACKGROUND_DOC_FALLBACK_BODY_LEGACY.trim();
+    if (
+      cur.name === PROJECT_BACKGROUND_DOC_NAME &&
+      cur.isProjectBackground &&
+      !shouldUpgradeLegacyBody
+    ) {
+      return list;
+    }
     const next = [...list];
-    next[idx] = { ...cur, name: PROJECT_BACKGROUND_DOC_NAME, isProjectBackground: true };
+    next[idx] = {
+      ...cur,
+      name: PROJECT_BACKGROUND_DOC_NAME,
+      isProjectBackground: true,
+      body: shouldUpgradeLegacyBody ? PROJECT_BACKGROUND_DOC_FALLBACK_BODY : cur.body,
+    };
     localStorage.setItem(docsKey(projectId), JSON.stringify(next));
     return next;
   }

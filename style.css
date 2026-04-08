@@ -115,3 +115,265 @@ body {
 .focus-dashed-orbit {
     animation: focus-dashed-orbit 12s linear infinite;
 }
+
+/* App dark mode (class toggled on AppShell root) */
+.app-dark {
+    color-scheme: dark;
+    /* Neutral dark palette (no blue cast) */
+    --app-bg: #121212;
+    --app-surface: #1a1a1a;
+    --app-surface-muted: #222222;
+    --app-border: #2f2f2f;
+    --app-text-strong: #f5f5f5;
+    --app-text-main: #dddddd;
+    --app-text-muted: #a3a3a3;
+}
+
+.app-dark,
+.app-dark body {
+    background-color: var(--app-bg) !important;
+    color: var(--app-text-main) !important;
+}
+
+/* Background layers */
+.app-dark .bg-\[\#fcfcfc\],
+.app-dark .bg-\[\#fafafa\],
+.app-dark .bg-gray-50 {
+    background-color: var(--app-bg) !important;
+}
+
+.app-dark .bg-white {
+    background-color: var(--app-surface) !important;
+}
+
+.app-dark .bg-gray-100 {
+    background-color: var(--app-surface-muted) !important;
+}
+
+.app-dark .bg-black {
+    background-color: #2a2a2a !important;
+}
+
+.app-dark .bg-emerald-50,
+.app-dark .bg-emerald-50\/40,
+.app-dark .bg-emerald-50\/50,
+.app-dark .bg-emerald-50\/70 {
+    background-color: rgba(16, 185, 129, 0.14) !important;
+}
+
+/* Borders */
+.app-dark .border-gray-100,
+.app-dark .border-gray-200,
+.app-dark .border-emerald-100,
+.app-dark .border-stone-200\/90 {
+    border-color: transparent !important;
+}
+
+/* Typography hierarchy */
+.app-dark .text-black,
+.app-dark .text-gray-900,
+.app-dark .text-gray-800,
+.app-dark .text-gray-700,
+.app-dark .text-gray-300,
+.app-dark .text-stone-800 {
+    color: var(--app-text-strong) !important;
+}
+
+.app-dark .text-gray-600,
+.app-dark .text-gray-500,
+.app-dark .text-gray-400,
+.app-dark .text-stone-500 {
+    color: var(--app-text-muted) !important;
+}
+
+.app-dark .text-white {
+    color: #ffffff !important;
+}
+
+/* Hover and interaction readability */
+.app-dark .hover\:bg-gray-50:hover,
+.app-dark .hover\:bg-gray-100:hover,
+.app-dark .hover\:bg-white\/60:hover {
+    background-color: #2a2a2a !important;
+}
+
+.app-dark .hover\:text-gray-800:hover,
+.app-dark .hover\:text-stone-800:hover,
+.app-dark .hover\:text-gray-600:hover {
+    color: var(--app-text-strong) !important;
+}
+
+/* Sticky bars, overlays, and subtle effects */
+.app-dark .bg-\[\#fcfcfc\]\/95 {
+    background-color: rgba(18, 18, 18, 0.94) !important;
+}
+
+.app-dark .shadow-sm,
+.app-dark .shadow-md,
+.app-dark .shadow-xl {
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35) !important;
+}
+
+.app-dark .focus-wave-bg::before,
+.app-dark .focus-wave-bg::after {
+    background: radial-gradient(closest-side, rgba(255, 255, 255, 0.1), rgba(10, 10, 10, 0) 72%) !important;
+}
+
+/* Todo tab / cards / title / priority readability */
+.app-dark .todo-card {
+    background-color: #1a1a1a !important;
+    border-color: #303030 !important;
+}
+
+.app-dark .todo-card .text-\[\#37352f\] {
+    color: #dddddd !important;
+}
+
+.app-dark .todo-card [data-todo-editor="1"] h1 {
+    color: #f5f5f5 !important;
+}
+
+.app-dark .todo-card [data-todo-editor="1"] h2,
+.app-dark .todo-card [data-todo-editor="1"] h3,
+.app-dark .todo-card [data-todo-editor="1"] p,
+.app-dark .todo-card [data-todo-editor="1"] li {
+    color: #d4d4d4 !important;
+}
+
+.app-dark .todo-card [data-todo-editor="1"] h1:empty::before,
+.app-dark .todo-card [data-todo-editor="1"] h1:has(br:only-child)::before {
+    color: #5f5f5f !important;
+}
+
+.app-dark .todo-card .bg-white\/50 {
+    background-color: rgba(26, 26, 26, 0.82) !important;
+}
+
+.app-dark .todo-card .text-gray-300 {
+    color: #8e8e8e !important;
+}
+
+/* Main top tabs + stats tabs active state */
+.app-dark .bg-gray-100\/50,
+.app-dark .bg-gray-100\/80 {
+    background-color: #242424 !important;
+}
+
+.app-dark .analysis-page .bg-white.shadow-sm,
+.app-dark .analysis-page .bg-white.text-black,
+.app-dark .analysis-page .bg-white.text-black.shadow-sm {
+    background-color: #2b2b2b !important;
+    color: #f5f5f5 !important;
+}
+
+/* Chat panel title / bubbles / content */
+.app-dark .chat-panel {
+    background-color: #171717 !important;
+    border-left: 1px solid #2f2f2f;
+}
+
+.app-dark .chat-panel .bg-blue-500 {
+    background-color: #3b82f6 !important;
+}
+
+.app-dark .chat-panel .bg-gray-100 {
+    background-color: #262626 !important;
+}
+
+.app-dark .chat-panel .text-gray-800,
+.app-dark .chat-panel .text-gray-900,
+.app-dark .chat-panel .text-gray-700 {
+    color: #ededed !important;
+}
+
+.app-dark .chat-panel .text-gray-400 {
+    color: #a3a3a3 !important;
+}
+
+.app-dark .chat-panel pre {
+    background-color: #111111 !important;
+    border: 1px solid #303030;
+}
+
+.app-dark .chat-panel code {
+    background-color: #303030 !important;
+    color: #f1f1f1 !important;
+}
+
+.app-dark .chat-panel textarea {
+    background-color: #202020 !important;
+    color: #f3f3f3 !important;
+    border-color: #333333 !important;
+}
+
+.app-dark .chat-panel textarea::placeholder {
+    color: #7c7c7c !important;
+}
+
+/* Analysis page cards and section blocks */
+.app-dark .analysis-page .bg-gradient-to-r,
+.app-dark .analysis-page .from-gray-50\/80,
+.app-dark .analysis-page .to-white {
+    background: #202020 !important;
+}
+
+.app-dark .analysis-page .bg-slate-100 {
+    background-color: #2a2a2a !important;
+}
+
+.app-dark .analysis-page .text-slate-800 {
+    color: #e8e8e8 !important;
+}
+
+.app-dark .analysis-page .bg-indigo-50\/40,
+.app-dark .analysis-page .bg-violet-50\/40 {
+    background-color: #212121 !important;
+}
+
+/* Agent/docs page list and editor */
+.app-dark .docs-panel {
+    background-color: #1a1a1a !important;
+    border-color: #303030 !important;
+}
+
+.app-dark .docs-panel .bg-gray-50\/80 {
+    background-color: #202020 !important;
+}
+
+.app-dark .docs-panel .hover\:bg-gray-50:hover,
+.app-dark .docs-panel .hover\:bg-white\/80:hover {
+    background-color: #292929 !important;
+}
+
+.app-dark .docs-panel textarea {
+    background-color: #181818 !important;
+    color: #ededed !important;
+    border-color: #313131 !important;
+}
+
+/* Remove top white lines and visible separators in dark mode */
+.app-dark .border-b,
+.app-dark .border-t,
+.app-dark .border-l,
+.app-dark .border-r {
+    border-color: transparent !important;
+}
+
+.app-dark hr,
+.app-dark .todo-card [data-todo-editor="1"] hr {
+    border-color: transparent !important;
+}
+
+/* Remove bright card/section outlines (stats/docs/chat/todo etc.) */
+.app-dark .border,
+.app-dark .border-gray-300,
+.app-dark .border-slate-200\/90,
+.app-dark .border-indigo-100\/60,
+.app-dark .border-violet-100\/60,
+.app-dark .border-emerald-200,
+.app-dark .border-rose-200,
+.app-dark .border-amber-200,
+.app-dark .border-white\/25,
+.app-dark .border-white\/35 {
+    border-color: transparent !important;
+}

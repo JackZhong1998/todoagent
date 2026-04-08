@@ -33,7 +33,11 @@ const settingsTranslations = {
   },
 };
 
-export const UserSettings: React.FC = () => {
+interface UserSettingsProps {
+  embedded?: boolean;
+}
+
+export const UserSettings: React.FC<UserSettingsProps> = ({ embedded = false }) => {
   const { language, setLanguage } = useLanguage();
   const { logout, isLoggedIn, isAuthLoaded } = useAuth();
   const { user } = useUser();
@@ -70,7 +74,7 @@ export const UserSettings: React.FC = () => {
   if (!isAuthLoaded || !isLoggedIn) return null;
 
   return (
-    <div ref={rootRef} className="fixed bottom-4 right-4 z-50">
+    <div ref={rootRef} className={embedded ? 'relative z-20' : 'fixed bottom-4 right-4 z-50'}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -90,7 +94,11 @@ export const UserSettings: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-3 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+        <div
+          className={`absolute bottom-full mb-3 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden ${
+            embedded ? 'left-0' : 'right-0'
+          }`}
+        >
           <div className="p-4 border-b border-gray-100">
           <div className="flex items-center space-x-3">
             {user?.imageUrl ? (

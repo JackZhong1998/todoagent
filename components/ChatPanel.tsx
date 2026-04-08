@@ -267,6 +267,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     () => allDocs.filter((d) => !d.isSkill),
     [allDocs]
   );
+  const effectiveReferencedDocIds = useMemo(
+    () => Array.from(new Set([...fixedPromptDocIds, ...pendingReferencedDocIds])),
+    [fixedPromptDocIds.join('|'), pendingReferencedDocIds.join('|')]
+  );
 
   useEffect(() => {
     setAllDocs(loadProjectDocs(projectId));
@@ -298,6 +302,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const plainContent = stripHtmlTags(todo.content || '').trim();
     return plainContent || todo.title || '';
   };
+  const getTodoFirstLine = useCallback((todo: Todo) => {
+    const plainContent = stripHtmlTags(todo.content || '').trim();
+    const firstLine = plainContent
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    return firstLine || todo.title || t.app.noTitle;
+  }, [t.app.noTitle]);
+
+  const currentHeaderTitle = useMemo(() => {
+    if (initialTodo && currentConversation?.todoId === initialTodo.id) {
+      return getTodoFirstLine(initialTodo);
+    }
+    return currentConversation?.title || t.app.aiAssistant;
+  }, [initialTodo, currentConversation?.todoId, currentConversation?.title, getTodoFirstLine, t.app.aiAssistant]);
 
   const buildTodoQuote = useCallback((todo: Todo, userLine?: string) => {
     const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -617,7 +636,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       }
     }
     const userLine = rawText || (imageUrls.length ? ct.userBubbleImageLabel : '');
-    const referenceDocs = pendingReferencedDocIds
+    const referenceDocs = effectiveReferencedDocIds
       .map((id) => allDocs.find((d) => d.id === id))
       .filter((d): d is WorkspaceDoc => !!d && !d.isSkill);
     const docBlock = referenceDocs.length
@@ -899,13 +918,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   return (
     <div
-      className="h-screen bg-white flex flex-col transition-all duration-300 ease-out"
+      className="chat-panel h-screen bg-white flex flex-col transition-all duration-300 ease-out"
       style={{ width: isOpen ? width : 0, overflow: isOpen ? 'visible' : 'hidden' }}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
         <div>
           <h2 className="text-sm font-bold text-gray-800">
-            {currentConversation?.title || t.app.aiAssistant}
+            {currentHeaderTitle}
           </h2>
           <p className="text-xs text-gray-400">
             {initialTodo ? ct.scopeTodo : ct.scopeGlobal}
@@ -1152,8 +1171,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       </div>
 
       <div className="p-4 border-t border-gray-100 bg-white flex-shrink-0">
-        {(pendingReferencedDocIds.length > 0 || (initialTodo && includeTodoContext)) ? (
+        {(effectiveReferencedDocIds.length > 0 || (initialTodo && includeTodoContext)) ? (
           <div className="flex flex-wrap gap-2 mb-2">
+            {fixedPromptDocIds.map((id) => {
+              const doc = allDocs.find((d) => d.id === id);
+              if (!doc) return null;
+              return (
+                <div key={id} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                  <FileText size={12} />
+                  <span className="max-w-[220px] truncate">{doc.name}</span>
+                </div>
+              );
+            })}
             {initialTodo && includeTodoContext ? (
               <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
                 <span className="max-w-[220px] truncate">{ct.todoContextLabel}: {stripHtmlTags(initialTodo.content || '').split(/\r?\n/).find(Boolean) || initialTodo.title || t.app.noTitle}</span>
@@ -1164,6 +1193,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               const doc = allDocs.find((d) => d.id === id);
               if (!doc) return null;
               const fixed = !!doc.isProjectBackground;
+              if (fixed) return null;
               return (
                 <div key={id} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
                   <FileText size={12} />
@@ -1329,7 +1359,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             <div className="max-h-[52vh] overflow-y-auto p-3 space-y-1.5">
               {selectableDocs.length ? selectableDocs.map((doc) => {
                 const fixed = !!doc.isProjectBackground;
-                const checked = pendingReferencedDocIds.includes(doc.id) || fixed;
+                const checked = effectiveReferencedDocIds.includes(doc.id) || fixed;
                 return (
                   <label key={doc.id} className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2.5 hover:bg-gray-50">
                     <div className="flex items-center gap-2 min-w-0">

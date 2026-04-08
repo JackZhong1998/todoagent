@@ -309,7 +309,7 @@ export const AIAnalysisPage: React.FC<AIAnalysisPageProps> = ({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="analysis-page space-y-6">
       {embedded ? (
         <div className="space-y-3">
           <div className={`${embeddedStickyBarClass} flex items-center gap-3 flex-wrap`}>

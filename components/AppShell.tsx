@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, House, Trees } from 'lucide-react';
+import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, House, Trees, Moon, Sun } from 'lucide-react';
 import { Todo, Priority, FilterType } from '../types';
 import { generateId, stripHtmlTags } from '../utils';
 import { setAgentCardStateInHtml } from '../utils/todoAgentCard';
@@ -82,6 +82,7 @@ type HistoryApplyRequest = {
 
 const ACTIVITY_STORAGE_KEY_PREFIX = 'todoagent_daily_activity_v1:project:';
 const FOCUS_TIMER_STORAGE_KEY_PREFIX = 'todoagent_focus_timer_v1:project:';
+const APP_THEME_STORAGE_KEY = 'todoagent_app_theme_v1';
 const FOCUS_DURATION_SECONDS = 25 * 60;
 
 const activityStorageKeyForProject = (projectId: string) => `${ACTIVITY_STORAGE_KEY_PREFIX}${projectId}`;
@@ -256,7 +257,11 @@ const AppShell: React.FC = () => {
 
   const [todos, setTodos] = useState<Todo[]>(() => loadProjectTodos(initialManifest.activeProjectId));
   const [filter, setFilter] = useState<FilterType>('ALL');
-  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(true);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(APP_THEME_STORAGE_KEY) === 'dark';
+  });
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(420);
   const [isResizingChat, setIsResizingChat] = useState(false);
@@ -362,6 +367,13 @@ const AppShell: React.FC = () => {
       if (focusTickTimerRef.current) window.clearInterval(focusTickTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(APP_THEME_STORAGE_KEY, darkMode ? 'dark' : 'light');
+    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   useEffect(() => {
     focusedTodoIdRef.current = focusedTodoId;
@@ -1154,7 +1166,7 @@ const AppShell: React.FC = () => {
 
   return (
     <WorkspaceSyncProvider bumpSync={bumpRemotePush}>
-    <div className="min-h-screen bg-[#fcfcfc] flex">
+    <div className={`min-h-screen bg-[#fcfcfc] flex ${darkMode ? 'app-dark' : ''}`}>
       {toast ? (
         <div className="pointer-events-none fixed top-4 left-1/2 z-[80] -translate-x-1/2">
           <div
@@ -1281,6 +1293,20 @@ const AppShell: React.FC = () => {
                 </div>
               </div>
           </button>
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center gap-2">
+              <UserSettings embedded />
+              <button
+                type="button"
+                onClick={() => setDarkMode((v) => !v)}
+                className="w-12 h-12 shrink-0 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
+                title={language === 'zh' ? (darkMode ? '切换到白天模式' : '切换到夜间模式') : darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                aria-label={language === 'zh' ? (darkMode ? '切换到白天模式' : '切换到夜间模式') : darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+            </div>
+          </div>
         </nav>
       </aside>
 
@@ -1471,8 +1497,6 @@ const AppShell: React.FC = () => {
         onClose={() => setPaywallOpen(false)}
         onUpgrade={startStripeCheckout}
       />
-
-      <UserSettings />
 
       <div className="fixed inset-0 pointer-events-none -z-20 opacity-[0.03]">
         <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>

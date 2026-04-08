@@ -955,7 +955,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
   return (
     <div 
       className={`
-        group relative bg-white rounded-[24px] border border-gray-100 p-8 transition-all duration-300
+        todo-card group relative bg-white rounded-[24px] border border-gray-100 p-8 transition-all duration-300
         hover:shadow-xl hover:shadow-gray-100/50
         ${todo.isCompleted ? 'opacity-60 bg-gray-50/80' : ''}
         ${isHighlighted ? 'border-blue-500 ring-4 ring-blue-500/10' : ''}

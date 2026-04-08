@@ -183,7 +183,7 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({ projectId, listS
   const embedTooltip = selected?.isProjectBackground ? d.embedAgentTooltipFixed : d.embedAgentTooltip;
 
   return (
-    <div className="flex h-[min(70vh,640px)] border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
+    <div className="docs-panel flex h-[min(70vh,640px)] border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
       <div className="w-[min(100%,280px)] flex-shrink-0 min-h-0 border-r border-gray-100 flex flex-col bg-gray-50/80">
         {listScope === 'user' ? (
           <div className="p-3 border-b border-gray-100 space-y-2 shrink-0">
