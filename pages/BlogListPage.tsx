@@ -1,23 +1,42 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { MarketingLayout } from '../components/MarketingLayout';
 import { getBlogPostsSorted, pickBlogLocale } from '../content/blogPosts';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePageSeo } from '../utils/pageSeo';
+import { buildBlogListPageJsonLd } from '../utils/seoJsonLd';
 
 export const BlogListPage: React.FC = () => {
   const { t, language } = useLanguage();
   const b = t.seo.blog;
   const posts = getBlogPostsSorted();
+  const jsonLd = useMemo(() => buildBlogListPageJsonLd(getBlogPostsSorted(), language), [language]);
+  const labels =
+    language === 'zh'
+      ? { home: '首页', blog: '博客' }
+      : { home: 'Home', blog: 'Blog' };
+
   usePageSeo({
     title: b.title,
     description: b.description,
     path: '/blog',
+    jsonLd,
   });
 
   return (
     <MarketingLayout>
       <section className="max-w-3xl mx-auto px-6 sm:px-8 py-20 sm:py-28">
+        <nav
+          aria-label={language === 'zh' ? '面包屑导航' : 'Breadcrumb'}
+          className="text-[13px] text-neutral-400 mb-6 flex items-center gap-2"
+        >
+          <Link to="/" className="hover:text-neutral-600">
+            {labels.home}
+          </Link>
+          <span>/</span>
+          <span className="text-neutral-500">{labels.blog}</span>
+        </nav>
+
         <h1 className="text-4xl sm:text-[2.5rem] font-semibold tracking-tight text-neutral-950">{b.h1}</h1>
         <p className="mt-5 text-[17px] text-neutral-500 leading-relaxed">{b.intro}</p>
 

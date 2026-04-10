@@ -142,9 +142,6 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
             <a href="mailto:hello@todoagent.cc" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
               Contact
             </a>
-            <a href="https://github.com/JackZhong1998/todoagent" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
-              GitHub
-            </a>
           </div>
         </div>
       </footer>
