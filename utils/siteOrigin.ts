@@ -2,7 +2,6 @@
 export function getSiteOrigin(): string {
   const raw = import.meta.env.VITE_SITE_URL as string | undefined;
   if (raw?.trim()) return raw.trim().replace(/\/$/, '');
-  if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
   return 'https://todoagent.cc';
 }
 

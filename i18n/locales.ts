@@ -260,7 +260,7 @@ export const translations = {
       home: {
         title: 'TodoAgent | AI To-Do, Agent Collaboration & Attention Workflow',
         description:
-          'TodoAgent is an AI to-do and collaboration app: attention-first workflow, compounding context with your Agent, and trackable loops for deep work—built for planners who use LLMs.',
+          'TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and repeatable execution loops.',
       },
       about: {
         title: 'About TodoAgent | Human–AI Collaboration for Deep Work',
@@ -596,7 +596,7 @@ export const translations = {
       home: {
         title: 'TodoAgent | AI待办、Agent协作与 Attention 工作法',
         description:
-          'TodoAgent 是面向深度工作的 AI 待办与协作工具：Attention 工作法、与 Agent 持续沉淀 context、可复盘任务闭环，适合已使用大模型的规划者与创作者。',
+          'TodoAgent 是 AI 待办工作区：强调 Attention 工作法、Agent 协作与可复用的执行闭环。',
       },
       about: {
         title: '关于 TodoAgent | 人机协作与可持续注意力系统',
