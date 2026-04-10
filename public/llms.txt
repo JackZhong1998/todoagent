@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# TodoAgent public pages for AI discovery
+Homepage: https://todoagent.cc/
+Solutions: https://todoagent.cc/solutions
+Blog: https://todoagent.cc/blog
+About: https://todoagent.cc/about
+Privacy: https://todoagent.cc/privacy
+Terms: https://todoagent.cc/terms

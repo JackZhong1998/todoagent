@@ -17,6 +17,11 @@ export function buildHomePageJsonLd(language: Language, t: AppTranslations): Rec
       url: `${origin}/`,
       inLanguage: inLang,
       description: t.seo.home.description,
+      potentialAction: {
+        '@type': 'SearchAction',
+        target: `${origin}/blog?query={search_term_string}`,
+        'query-input': 'required name=search_term_string',
+      },
     },
     {
       '@context': 'https://schema.org',
