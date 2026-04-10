@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, LayoutGrid, ChevronLeft, ChevronRight, Bot, ListTodo, BarChart3, House, Trees, Moon, Sun } from 'lucide-react';
 import { Todo, Priority, FilterType } from '../types';
@@ -26,16 +26,11 @@ import {
   normalizeStringArray,
 } from '../utils/taskReplaceabilityAnalysis';
 import { TodoItem } from './TodoItem';
-import { ChatPanel } from './ChatPanel';
-import { UserSettings } from './UserSettings';
 import { AIAnalysisPage, AnalysisResultItem, Replaceability, ANALYSIS_FAILED_TASK_TYPE } from './AIAnalysisPage';
-import { AgentHomePanel } from './AgentHomePanel';
-import { ProjectSwitcher } from './ProjectSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { WorkspaceSyncProvider } from '../contexts/WorkspaceSyncContext';
 import { useAgentEntitlement } from '../hooks/useAgentEntitlement';
-import { PaywallModal } from './PaywallModal';
 import {
   moonshotChatJson,
   moonshotDirectApiKey,
@@ -84,6 +79,12 @@ const ACTIVITY_STORAGE_KEY_PREFIX = 'todoagent_daily_activity_v1:project:';
 const FOCUS_TIMER_STORAGE_KEY_PREFIX = 'todoagent_focus_timer_v1:project:';
 const APP_THEME_STORAGE_KEY = 'todoagent_app_theme_v1';
 const FOCUS_DURATION_SECONDS = 25 * 60;
+
+const ChatPanel = lazy(() => import('./ChatPanel').then((m) => ({ default: m.ChatPanel })));
+const UserSettings = lazy(() => import('./UserSettings').then((m) => ({ default: m.UserSettings })));
+const AgentHomePanel = lazy(() => import('./AgentHomePanel').then((m) => ({ default: m.AgentHomePanel })));
+const ProjectSwitcher = lazy(() => import('./ProjectSwitcher').then((m) => ({ default: m.ProjectSwitcher })));
+const PaywallModal = lazy(() => import('./PaywallModal').then((m) => ({ default: m.PaywallModal })));
 
 const activityStorageKeyForProject = (projectId: string) => `${ACTIVITY_STORAGE_KEY_PREFIX}${projectId}`;
 const focusTimerStorageKeyForProject = (projectId: string) => `${FOCUS_TIMER_STORAGE_KEY_PREFIX}${projectId}`;
@@ -1187,16 +1188,18 @@ const AppShell: React.FC = () => {
       >
         <nav className="h-full flex flex-col pt-8 px-3 pb-6 w-52 min-h-0">
           <div className="shrink-0 mb-3 w-full">
-            <ProjectSwitcher
-              activeProjectId={activeProjectId}
-              projects={projects}
-              onSelectProject={selectProject}
-              onAddProject={addProject}
-              editing={editingProjectNames}
-              onToggleEditing={() => setEditingProjectNames((v) => !v)}
-              onRenameProject={renameProject}
-              onPopoverClose={exitProjectNameEditMode}
-            />
+            <Suspense fallback={null}>
+              <ProjectSwitcher
+                activeProjectId={activeProjectId}
+                projects={projects}
+                onSelectProject={selectProject}
+                onAddProject={addProject}
+                editing={editingProjectNames}
+                onToggleEditing={() => setEditingProjectNames((v) => !v)}
+                onRenameProject={renameProject}
+                onPopoverClose={exitProjectNameEditMode}
+              />
+            </Suspense>
           </div>
           <div className="space-y-1 min-h-0 flex-1 overflow-y-auto">
             {navItems.map(({ id, label, icon: Icon }) => (
@@ -1295,7 +1298,9 @@ const AppShell: React.FC = () => {
           </button>
           <div className="mt-3 pt-3 border-t border-gray-100">
             <div className="flex items-center gap-2">
-              <UserSettings embedded />
+              <Suspense fallback={null}>
+                <UserSettings embedded />
+              </Suspense>
               <button
                 type="button"
                 onClick={() => setDarkMode((v) => !v)}
@@ -1397,12 +1402,14 @@ const AppShell: React.FC = () => {
                   <div className={`${APP_MAIN_STICKY_BAR} flex items-center gap-3 flex-wrap`}>
                     {navToggle}
                   </div>
-                  <AgentHomePanel
-                    projectId={activeProjectId}
-                    todos={todos}
-                    analysisByTodoId={analysisByTodoId}
-                    sopMarkdown={sopMarkdown}
-                  />
+                  <Suspense fallback={null}>
+                    <AgentHomePanel
+                      projectId={activeProjectId}
+                      todos={todos}
+                      analysisByTodoId={analysisByTodoId}
+                      sopMarkdown={sopMarkdown}
+                    />
+                  </Suspense>
                 </div>
               )}
 
@@ -1469,34 +1476,38 @@ const AppShell: React.FC = () => {
         />
       )}
 
-      <ChatPanel
-        key={activeProjectId}
-        projectId={activeProjectId}
-        isOpen={isChatOpen}
-        width={chatWidth}
-        onClose={closeChat}
-        initialTodo={currentTodoForChatLive}
-        launchPayload={chatLaunchPayload}
-        onNewGlobalChat={() => void openGlobalChat()}
-        onTodoAgentCardResolved={handleTodoAgentCardResolved}
-        onTodoAgentCardStatusChange={handleTodoAgentCardStatusChange}
-        onAgentQuotaExceeded={() => setPaywallOpen(true)}
-        beforeSendMessage={async () => {
-          try {
-            const ok = await checkCanOpenAgent();
-            if (!ok) setPaywallOpen(true);
-            return ok;
-          } catch {
-            return true;
-          }
-        }}
-      />
+      <Suspense fallback={null}>
+        <ChatPanel
+          key={activeProjectId}
+          projectId={activeProjectId}
+          isOpen={isChatOpen}
+          width={chatWidth}
+          onClose={closeChat}
+          initialTodo={currentTodoForChatLive}
+          launchPayload={chatLaunchPayload}
+          onNewGlobalChat={() => void openGlobalChat()}
+          onTodoAgentCardResolved={handleTodoAgentCardResolved}
+          onTodoAgentCardStatusChange={handleTodoAgentCardStatusChange}
+          onAgentQuotaExceeded={() => setPaywallOpen(true)}
+          beforeSendMessage={async () => {
+            try {
+              const ok = await checkCanOpenAgent();
+              if (!ok) setPaywallOpen(true);
+              return ok;
+            } catch {
+              return true;
+            }
+          }}
+        />
+      </Suspense>
 
-      <PaywallModal
-        open={paywallOpen}
-        onClose={() => setPaywallOpen(false)}
-        onUpgrade={startStripeCheckout}
-      />
+      <Suspense fallback={null}>
+        <PaywallModal
+          open={paywallOpen}
+          onClose={() => setPaywallOpen(false)}
+          onUpgrade={startStripeCheckout}
+        />
+      </Suspense>
 
       <div className="fixed inset-0 pointer-events-none -z-20 opacity-[0.03]">
         <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
