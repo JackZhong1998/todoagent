@@ -67,7 +67,7 @@
       ]
     },
     {
-      "source": "/((?!api/|app/).*)",
+      "source": "/((?!api/|app/|assets/|favicon\\.svg$).*)",
       "headers": [
         {
           "key": "Cache-Control",
