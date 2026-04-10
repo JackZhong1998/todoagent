@@ -2,7 +2,7 @@
 export function getSiteOrigin(): string {
   const raw = import.meta.env.VITE_SITE_URL as string | undefined;
   if (raw?.trim()) return raw.trim().replace(/\/$/, '');
-  return 'https://todoagent.cc';
+  return 'https://www.todoagent.cc';
 }
 
 export function absoluteUrl(pathname: string): string {

@@ -258,9 +258,9 @@ export const translations = {
     },
     seo: {
       home: {
-        title: 'TodoAgent | AI To-Do, Agent Collaboration & Attention Workflow',
+        title: 'TodoAgent | AI To-Do Workspace & Agent Collaboration',
         description:
-          'An AI to-do workspace for attention-first planning, agent collaboration, and repeatable delivery loops.',
+          'TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and reusable delivery loops for focused teams.',
       },
       about: {
         title: 'About TodoAgent | Human–AI Collaboration for Deep Work',
@@ -594,9 +594,9 @@ export const translations = {
     },
     seo: {
       home: {
-        title: 'TodoAgent | AI待办、Agent协作与 Attention 工作法',
+        title: 'TodoAgent | AI待办工作区与 Agent 协作',
         description:
-          'TodoAgent 是 AI 待办工作区：强调 Attention 工作法、Agent 协作与可复用的执行闭环。',
+          'TodoAgent 是 AI 待办工作区：强调 Attention 规划、Agent 协作，以及面向深度工作的可复用交付闭环。',
       },
       about: {
         title: '关于 TodoAgent | 人机协作与可持续注意力系统',

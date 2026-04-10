@@ -22,7 +22,7 @@ function todoagentSitemapPlugin(siteOrigin: string) {
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    const siteOrigin = (env.VITE_SITE_URL || 'https://todoagent.cc').replace(/\/$/, '');
+    const siteOrigin = (env.VITE_SITE_URL || 'https://www.todoagent.cc').replace(/\/$/, '');
     return {
       server: {
         port: 3000,

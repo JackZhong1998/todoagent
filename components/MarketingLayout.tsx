@@ -34,6 +34,12 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
 
   return (
     <div className="min-h-dvh bg-white text-neutral-900 font-sans antialiased selection:bg-neutral-200/80">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:bg-white focus:text-neutral-900 focus:px-3 focus:py-2 focus:rounded-md focus:shadow"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/80 backdrop-blur-xl backdrop-saturate-150">
         <div
           className="max-w-6xl mx-auto px-4 sm:px-8 py-4 flex items-center justify-between gap-4"
@@ -110,7 +116,7 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
         </div>
       </header>
 
-      <main>{children}</main>
+      <main id="main-content">{children}</main>
 
       <footer className="border-t border-neutral-200/80 mt-24 sm:mt-32 bg-[#fafafa]">
         <div className="max-w-5xl mx-auto px-6 sm:px-8 py-14 sm:py-16 flex flex-col sm:flex-row flex-wrap gap-8 sm:gap-6 items-start sm:items-center justify-between text-[13px] text-neutral-500 leading-relaxed">
@@ -130,6 +136,15 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
             <Link to="/terms" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
               {m.footerTerms}
             </Link>
+            <Link to="/editorial-policy" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
+              Editorial Policy
+            </Link>
+            <a href="mailto:hello@todoagent.cc" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
+              Contact
+            </a>
+            <a href="https://github.com/JackZhong1998/todoagent" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
+              GitHub
+            </a>
           </div>
         </div>
       </footer>

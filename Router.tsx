@@ -13,6 +13,9 @@ const BlogDetailPage = lazy(() => import('./pages/BlogDetailPage').then((m) => (
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('./pages/TermsPage').then((m) => ({ default: m.TermsPage })));
 const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })));
+const EditorialPolicyPage = lazy(() =>
+  import('./pages/EditorialPolicyPage').then((m) => ({ default: m.EditorialPolicyPage }))
+);
 const SolutionsHubPage = lazy(() => import('./pages/SolutionsHubPage').then((m) => ({ default: m.SolutionsHubPage })));
 const SolutionsDetailPage = lazy(() =>
   import('./pages/SolutionsDetailPage').then((m) => ({ default: m.SolutionsDetailPage }))
@@ -71,6 +74,7 @@ const AppRouter: React.FC = () => {
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/editorial-policy" element={<EditorialPolicyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
