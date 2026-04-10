@@ -260,7 +260,7 @@ export const translations = {
       home: {
         title: 'TodoAgent | AI To-Do, Agent Collaboration & Attention Workflow',
         description:
-          'TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and repeatable execution loops.',
+          'An AI to-do workspace for attention-first planning, agent collaboration, and repeatable delivery loops.',
       },
       about: {
         title: 'About TodoAgent | Human–AI Collaboration for Deep Work',
