@@ -33,3 +33,6 @@ dist-ssr
 supabase/.temp/
 .vercel
 .env*.local
+
+# SEO audit CLI outputs (regenerate as needed)
+seo-audit-*.json
