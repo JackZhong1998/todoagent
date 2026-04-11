@@ -16,6 +16,7 @@ const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default:
 const EditorialPolicyPage = lazy(() =>
   import('./pages/EditorialPolicyPage').then((m) => ({ default: m.EditorialPolicyPage }))
 );
+const ContactPage = lazy(() => import('./pages/ContactPage').then((m) => ({ default: m.ContactPage })));
 const SolutionsHubPage = lazy(() => import('./pages/SolutionsHubPage').then((m) => ({ default: m.SolutionsHubPage })));
 const SolutionsDetailPage = lazy(() =>
   import('./pages/SolutionsDetailPage').then((m) => ({ default: m.SolutionsDetailPage }))
@@ -74,6 +75,7 @@ const AppRouter: React.FC = () => {
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/contact" element={<ContactPage />} />
           <Route path="/editorial-policy" element={<EditorialPolicyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

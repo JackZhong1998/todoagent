@@ -12,27 +12,43 @@
     <meta property="og:description" content="TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and reusable delivery loops for focused teams.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://www.todoagent.cc/">
-    <meta property="og:image" content="https://todoagent.cc/favicon.svg">
+    <meta property="og:image" content="https://www.todoagent.cc/favicon.svg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:locale" content="en_US">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="TodoAgent | AI To-Do Workspace & Agent Collaboration">
     <meta name="twitter:description" content="TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and reusable delivery loops for focused teams.">
-    <meta name="twitter:image" content="https://todoagent.cc/favicon.svg">
+    <meta name="twitter:image" content="https://www.todoagent.cc/favicon.svg">
     <link rel="alternate" type="text/plain" title="llms.txt" href="/llms.txt">
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebSite",
-        "name": "TodoAgent",
-        "url": "https://www.todoagent.cc/",
-        "description": "TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and reusable delivery loops for focused teams.",
-        "potentialAction": {
-          "@type": "SearchAction",
-          "target": "https://www.todoagent.cc/blog?query={search_term_string}",
-          "query-input": "required name=search_term_string"
-        }
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://www.todoagent.cc/#organization",
+            "name": "TodoAgent",
+            "url": "https://www.todoagent.cc/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://www.todoagent.cc/favicon.svg"
+            }
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://www.todoagent.cc/#website",
+            "name": "TodoAgent",
+            "url": "https://www.todoagent.cc/",
+            "description": "TodoAgent is an AI to-do workspace for attention-first planning, agent collaboration, and reusable delivery loops for focused teams.",
+            "publisher": { "@id": "https://www.todoagent.cc/#organization" },
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://www.todoagent.cc/blog?query={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
+          }
+        ]
       }
     </script>
     <title>TodoAgent | AI To-Do Workspace & Agent Collaboration</title>
@@ -66,18 +82,29 @@
       </header>
       <article>
         <h1>An attention-first workspace for repeatable human and machine workflows</h1>
-        <h2>Attention-first execution system for practical collaboration</h2>
         <p>
-          This workspace is designed for teams and individuals who need consistent deep work output. Instead of treating tasks as
-          isolated checklist items, it stores context, constraints, and quality bars so assistants can reuse knowledge and execute with
-          less repetition. The result is a practical system where people focus on judgment while automation handles repeatable execution.
+          TodoAgent is an <strong>AI to-do workspace</strong> for teams and individuals who need consistent deep work output.
+          It connects your task list to collaboration loops so judgment stays human and execution can scale—explore
+          <a href="/solutions">role-based solutions</a>, read the <a href="/blog">blog</a> on attention workflow, or learn
+          <a href="/about">why we built TodoAgent</a>.
         </p>
-        <h3>What improves in daily operations</h3>
+        <h2>Why this AI to-do workspace maps to real outcomes</h2>
+        <p>
+          Instead of treating tasks as isolated checklist items, TodoAgent stores context, constraints, and quality bars so
+          assistants can reuse knowledge and execute with less repetition. The result is a practical system where people focus
+          on judgment while automation handles repeatable execution.
+        </p>
+        <h2>Attention-first execution for practical collaboration</h2>
         <p>
           The product combines focused planning, replaceability analysis, delivery handoff, and reusable SOP memory. Teams can
           track how work quality and speed improve over time, review previous decisions, and build a compounding workflow from daily
           operations. This setup is useful for operators, founders, and knowledge workers who need reliable output rather than
           one-off chat results.
+        </p>
+        <h3>What improves in daily operations</h3>
+        <p>
+          You get clearer handoffs between people and agents, fewer repeated explanations, and a reviewable record of what worked—so
+          each week compounds instead of resetting.
         </p>
         <p>
           It is built for people who want a calmer, more reliable way to ship. Every task can carry the context that usually
@@ -102,13 +129,14 @@
         <a href="/solutions">Solutions</a>
         <a href="/blog">Blog</a>
         <a href="/about">About</a>
+        <a href="/contact">Contact</a>
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
         <a href="/editorial-policy">Editorial Policy</a>
       </nav>
       <footer>
         <p>© TodoAgent</p>
-        <p><a href="mailto:hello@todoagent.cc">Contact</a></p>
+        <p><a href="/contact">Contact</a> · <a href="mailto:hello@todoagent.cc">hello@todoagent.cc</a></p>
       </footer>
     </main>
     <div id="root"></div>

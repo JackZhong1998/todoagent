@@ -10,6 +10,7 @@ export function buildHomePageJsonLd(language: Language, t: AppTranslations): Rec
   const faq = t.seo.faq;
   const organizationId = `${origin}/#organization`;
 
+  const logoUrl = `${origin}/favicon.svg`;
   return [
     {
       '@context': 'https://schema.org',
@@ -17,11 +18,15 @@ export function buildHomePageJsonLd(language: Language, t: AppTranslations): Rec
       '@id': organizationId,
       name: 'TodoAgent',
       url: `${origin}/`,
-      logo: `${origin}/favicon.svg`,
+      logo: {
+        '@type': 'ImageObject',
+        url: logoUrl,
+      },
     },
     {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
+      '@id': `${origin}/#website`,
       name: 'TodoAgent',
       url: `${origin}/`,
       inLanguage: inLang,
@@ -189,6 +194,39 @@ export function buildBlogPostingJsonLd(
           item: url,
         },
       ],
+    },
+  ];
+}
+
+/** 联系页：Organization + ContactPage（isPartOf 指向站点 #website） */
+export function buildContactPageJsonLd(language: Language, t: AppTranslations): Record<string, unknown>[] {
+  const origin = getSiteOrigin();
+  const organizationId = `${origin}/#organization`;
+  const websiteId = `${origin}/#website`;
+  const contactUrl = `${origin}/contact`;
+  const logoUrl = `${origin}/favicon.svg`;
+
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'Organization',
+      '@id': organizationId,
+      name: 'TodoAgent',
+      url: `${origin}/`,
+      logo: {
+        '@type': 'ImageObject',
+        url: logoUrl,
+      },
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'ContactPage',
+      '@id': `${contactUrl}#webpage`,
+      name: t.contact.title,
+      url: contactUrl,
+      description: t.seo.contact.description,
+      isPartOf: { '@id': websiteId },
+      inLanguage: language === 'zh' ? 'zh-CN' : 'en',
     },
   ];
 }

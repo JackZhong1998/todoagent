@@ -207,6 +207,7 @@ export const translations = {
       footerBlog: 'Blog',
       footerPrivacy: 'Privacy',
       footerTerms: 'Terms',
+      footerContact: 'Contact',
     },
     home: {
       badge: 'SaaS for Focused Work Collaboration',
@@ -250,6 +251,13 @@ export const translations = {
       p3:
         'If you are exploring a steadier human–AI workflow, try TodoAgent and turn “busy” into steady progress.',
     },
+    contact: {
+      title: 'Contact',
+      intro: 'Questions about TodoAgent, partnerships, or press? Email us—we read every message.',
+      emailLabel: 'Email',
+      responseTime: 'We typically reply within two business days.',
+      mailtoCta: 'hello@todoagent.cc',
+    },
     privacy: {
       documentTitle: 'Privacy Policy · TodoAgent',
     },
@@ -266,6 +274,11 @@ export const translations = {
         title: 'About TodoAgent | Human–AI Collaboration for Deep Work',
         description:
           'Why TodoAgent exists: sustainable attention systems, todo-centered context, and long-term collaboration with AI—beyond a simple task list.',
+      },
+      contact: {
+        title: 'Contact TodoAgent | AI To-Do Workspace',
+        description:
+          'Contact TodoAgent for product questions, feedback, or partnerships. We respond by email at hello@todoagent.cc.',
       },
       blog: {
         title: 'Blog | TodoAgent — Attention Workflow & Agent Tips',
@@ -545,6 +558,7 @@ export const translations = {
       footerBlog: '博客',
       footerPrivacy: '隐私协议',
       footerTerms: '用户协议',
+      footerContact: '联系我们',
     },
     home: {
       badge: '面向深度工作的协作 SaaS',
@@ -586,6 +600,13 @@ export const translations = {
         '在真实工作里，效率问题通常不是缺一个待办软件，而是缺一套能持续运转的注意力系统。TodoAgent 围绕 Todolist、上下文和协作反馈搭建，就是为了让每次执行都能沉淀为下一次效率提升的基础。',
       p3: '如果你也在探索更稳定的人机协作工作流，欢迎使用 TodoAgent，一起把“忙”变成“有节奏地推进”。',
     },
+    contact: {
+      title: '联系我们',
+      intro: '关于 TodoAgent 产品、合作或媒体咨询，欢迎发邮件，我们会阅读每一封来信。',
+      emailLabel: '邮箱',
+      responseTime: '我们通常在两个工作日内回复。',
+      mailtoCta: 'hello@todoagent.cc',
+    },
     privacy: {
       documentTitle: '隐私政策 · TodoAgent',
     },
@@ -602,6 +623,10 @@ export const translations = {
         title: '关于 TodoAgent | 人机协作与可持续注意力系统',
         description:
           '了解 TodoAgent 的初衷：把 AI 从偶尔用到的工具变成长期协作伙伴，以待办与上下文为核心建立可迭代的注意力系统。',
+      },
+      contact: {
+        title: '联系 TodoAgent | AI 待办工作区',
+        description: '联系 TodoAgent：产品咨询、反馈或合作。我们通过 hello@todoagent.cc 回复邮件。',
       },
       blog: {
         title: '博客 | TodoAgent — Attention 工作法与 Agent 实践',

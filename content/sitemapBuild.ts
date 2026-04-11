@@ -12,6 +12,7 @@ const STATIC: SitemapUrlRow[] = [
   { path: '/blog', changefreq: 'weekly', priority: 0.9 },
   { path: '/solutions', changefreq: 'weekly', priority: 0.9 },
   { path: '/about', changefreq: 'monthly', priority: 0.7 },
+  { path: '/contact', changefreq: 'yearly', priority: 0.6 },
   { path: '/editorial-policy', changefreq: 'yearly', priority: 0.5 },
   { path: '/privacy', changefreq: 'yearly', priority: 0.4 },
   { path: '/terms', changefreq: 'yearly', priority: 0.4 },

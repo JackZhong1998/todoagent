@@ -139,9 +139,9 @@ export const MarketingLayout: React.FC<Props> = ({ children }) => {
             <Link to="/editorial-policy" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
               Editorial Policy
             </Link>
-            <a href="mailto:hello@todoagent.cc" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
-              Contact
-            </a>
+            <Link to="/contact" className="text-neutral-600 hover:text-[#0071e3] transition-colors duration-150">
+              {m.footerContact}
+            </Link>
           </div>
         </div>
       </footer>
